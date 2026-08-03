@@ -1,0 +1,80 @@
+{{define "doc"}}
+<section id="page-comments" class="page-comments">
+  {{if .PageComments}}
+  <h2 class="section-label">Page comments</h2>
+  {{range .PageComments}}
+    {{template "comment" .}}
+  {{end}}
+  {{end}}
+  <div id="page-form-slot"></div>
+</section>
+
+<article class="markdown-body">
+  {{range .Blocks}}
+  <div class="block" id="block-{{.Index}}" data-block="{{.Index}}">
+    <button class="add-comment-btn" title="Comment on this block"
+            hx-get="/comment-form?block={{.Index}}"
+            hx-target="#form-slot-{{.Index}}" hx-swap="innerHTML">+</button>
+    <div class="block-content">{{raw .HTML}}</div>
+    <div class="block-comments">
+      {{range .Comments}}
+        {{template "comment" .}}
+      {{end}}
+      <div id="form-slot-{{.Index}}" class="form-slot"></div>
+    </div>
+  </div>
+  {{end}}
+</article>
+{{end}}
+
+{{define "comment"}}
+<div class="comment" id="comment-{{.ID}}" data-comment-id="{{.ID}}">
+  <div class="comment-head">
+    <span class="comment-author">{{if .Author}}{{.Author}}{{else}}anonymous{{end}}</span>
+    <span class="comment-ts">{{fmtTime .Ts}}</span>
+    <button class="icon-btn delete-btn" title="Delete comment thread"
+            hx-delete="/comments/{{.ID}}" hx-target="#doc" hx-swap="innerHTML">×</button>
+  </div>
+  <div class="comment-text">{{.Text}}</div>
+  {{range .Replies}}
+  <div class="reply">
+    <div class="comment-head">
+      <span class="comment-author">{{if .Author}}{{.Author}}{{else}}anonymous{{end}}</span>
+      <span class="comment-ts">{{fmtTime .Ts}}</span>
+    </div>
+    <div class="comment-text">{{.Text}}</div>
+  </div>
+  {{end}}
+  <form class="reply-form" hx-post="/comments/{{.ID}}/reply" hx-target="#doc"
+        hx-swap="innerHTML" hx-include="#author">
+    <input type="text" name="text" placeholder="Reply…" required>
+    <button type="submit" class="btn btn-small">Reply</button>
+  </form>
+</div>
+{{end}}
+
+{{define "comment-form"}}
+<form class="comment-form" hx-post="/comments" hx-target="#doc" hx-swap="innerHTML"
+      hx-include="#author">
+  {{if .Page}}
+  <input type="hidden" name="page" value="1">
+  {{else}}
+  <input type="hidden" name="block" value="{{.Block}}">
+  {{end}}
+  <textarea name="text" rows="3" required
+            placeholder="{{if .Page}}Comment on the whole document…{{else}}Comment on this block…{{end}}"></textarea>
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary btn-small">Comment</button>
+    <button type="button" class="btn btn-small"
+            onclick="this.closest('.comment-form').remove()">Cancel</button>
+  </div>
+</form>
+{{end}}
+
+{{define "handback"}}
+<div class="handback-done">
+  <h1>Handed back ✓</h1>
+  <p>Your review was saved into the markdown file and control was returned
+     to the agent. You can close this tab.</p>
+</div>
+{{end}}
