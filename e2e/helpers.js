@@ -141,8 +141,11 @@ function makeRepo() {
         GIT_COMMITTER_EMAIL: "t@t",
       },
     });
-  const write = (name, content) =>
-    fs.writeFileSync(path.join(dir, name), content);
+  const write = (name, content) => {
+    const p = path.join(dir, name);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, content);
+  };
 
   git("init", "-b", "main");
   write(

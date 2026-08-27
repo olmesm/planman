@@ -24,7 +24,9 @@ No database, no cloud, no auth, no CDN.
 └──────────┘   {"event":"handback", ...}
 ```
 
-![A git diff reviewed GitHub-style: word-level highlights and an inline comment thread](docs/diff.png)
+![A git diff reviewed GitHub-style: file tree, word-level highlights, and an inline comment thread](docs/diff.png)
+
+![The same review in split view with the dark theme](docs/split.png)
 
 ![A rendered markdown plan with an inline comment thread and a mermaid diagram](docs/review.png)
 
@@ -68,7 +70,8 @@ On start they print `{"event":"ready","url":"http://127.0.0.1:PORT"}`
 
 ## Reviewing a diff
 
-`planman diff` renders the changes the way GitHub's PR review does:
+`planman diff` renders the changes the way GitHub's PR review does: a
+file-tree sidebar (status dots, viewed checkmarks, click to jump),
 per-file cards with add/delete stats, syntax-highlighted rows,
 word-level change emphasis, expandable hunk context, collapse and
 **Viewed** checkboxes, and a unified/split toggle. Three scopes cover

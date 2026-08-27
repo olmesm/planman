@@ -78,6 +78,10 @@
       var box = file.querySelector(".viewed-box");
       if (box) box.checked = isViewed;
       file.classList.toggle("collapsed", !!collapsed[path]);
+      var treeEntry = document.querySelector(
+        '.tree-file[data-path="' + CSS.escape(path) + '"]'
+      );
+      if (treeEntry) treeEntry.classList.toggle("viewed", isViewed);
     });
   }
 
@@ -88,7 +92,7 @@
     if (e.target.checked) state[file.dataset.path] = file.dataset.fp;
     else delete state[file.dataset.path];
     saveViewed(state);
-    file.classList.toggle("viewed", e.target.checked);
+    applyFileState();
   });
 
   document.body.addEventListener("click", function (e) {

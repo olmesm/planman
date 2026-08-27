@@ -3,6 +3,8 @@ package diffmode
 import (
 	"fmt"
 	"html/template"
+	"sort"
+	"strings"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/olmesm/planman/internal/gitdiff"
@@ -17,12 +19,90 @@ type contentData struct {
 	Base         string
 	View         string // "unified" | "split"
 	Files        []*fileVM
+	Tree         []*treeNode
 	PageComments []*review.Comment
 	// Detached threads whose file is no longer in the diff at all.
 	Detached  []*review.Comment
 	NumFiles  int
 	TotalAdds int
 	TotalDels int
+}
+
+// treeNode is one entry in the file-tree sidebar: a directory (possibly
+// a compressed chain like "internal/server") or a changed file.
+type treeNode struct {
+	Name        string
+	Path        string // file nodes: full path, matching the file card
+	IsDir       bool
+	Status      string
+	Fingerprint string
+	Additions   int
+	Deletions   int
+	Children    []*treeNode
+}
+
+// buildTree folds the (path-sorted) file list into a directory tree,
+// with single-child directory chains compressed GitHub-style.
+func buildTree(files []*fileVM) []*treeNode {
+	root := &treeNode{IsDir: true}
+	dirs := map[string]*treeNode{"": root}
+	for _, f := range files {
+		parts := strings.Split(f.Path, "/")
+		dirPath := ""
+		parent := root
+		for _, p := range parts[:len(parts)-1] {
+			if dirPath == "" {
+				dirPath = p
+			} else {
+				dirPath += "/" + p
+			}
+			n := dirs[dirPath]
+			if n == nil {
+				n = &treeNode{Name: p, IsDir: true}
+				dirs[dirPath] = n
+				parent.Children = append(parent.Children, n)
+			}
+			parent = n
+		}
+		parent.Children = append(parent.Children, &treeNode{
+			Name:        parts[len(parts)-1],
+			Path:        f.Path,
+			Status:      f.Status,
+			Fingerprint: f.Fingerprint,
+			Additions:   f.Additions,
+			Deletions:   f.Deletions,
+		})
+	}
+	compressTree(root)
+	sortTree(root)
+	return root.Children
+}
+
+func compressTree(n *treeNode) {
+	if n.IsDir && n.Name != "" {
+		for len(n.Children) == 1 && n.Children[0].IsDir {
+			c := n.Children[0]
+			n.Name += "/" + c.Name
+			n.Children = c.Children
+		}
+	}
+	for _, c := range n.Children {
+		compressTree(c)
+	}
+}
+
+// sortTree orders directories before files, each alphabetically.
+func sortTree(n *treeNode) {
+	sort.SliceStable(n.Children, func(i, j int) bool {
+		a, b := n.Children[i], n.Children[j]
+		if a.IsDir != b.IsDir {
+			return a.IsDir
+		}
+		return a.Name < b.Name
+	})
+	for _, c := range n.Children {
+		sortTree(c)
+	}
 }
 
 type fileVM struct {

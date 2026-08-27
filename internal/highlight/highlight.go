@@ -5,7 +5,9 @@ package highlight
 
 import (
 	"bytes"
+	"fmt"
 	"html"
+	"sort"
 	"strings"
 	"sync"
 
@@ -84,13 +86,53 @@ func Stylesheet() []byte {
 	return sheet
 }
 
+// styleCSS renders a style as CSS rules covering every standard token
+// class, resolving each color through the style's inheritance chain.
+// Emitting the full set for both themes matters: the light and dark
+// styles define different subsets, and any class the dark block left
+// out would keep its light color on a dark background.
 func styleCSS(name string) []byte {
 	style := styles.Get(name)
 	if style == nil {
 		style = styles.Fallback
 	}
+	base := style.Get(chroma.Background)
+
+	classes := make([]string, 0, len(chroma.StandardTypes))
+	byClass := map[string]chroma.TokenType{}
+	for t, cls := range chroma.StandardTypes {
+		if cls == "" || cls == "chroma" || t == chroma.Background {
+			continue
+		}
+		classes = append(classes, cls)
+		byClass[cls] = t
+	}
+	sort.Strings(classes)
+
 	var b bytes.Buffer
-	_ = Formatter.WriteCSS(&b, style)
+	fmt.Fprintf(&b, ".chroma { color: %s; background-color: %s }\n",
+		base.Colour.String(), base.Background.String())
+	for _, cls := range classes {
+		e := style.Get(byClass[cls])
+		colour := e.Colour
+		if !colour.IsSet() {
+			colour = base.Colour
+		}
+		fmt.Fprintf(&b, ".chroma .%s { color: %s", cls, colour.String())
+		if e.Background.IsSet() && e.Background != base.Background {
+			fmt.Fprintf(&b, "; background-color: %s", e.Background.String())
+		}
+		if e.Bold == chroma.Yes {
+			b.WriteString("; font-weight: bold")
+		}
+		if e.Italic == chroma.Yes {
+			b.WriteString("; font-style: italic")
+		}
+		if e.Underline == chroma.Yes {
+			b.WriteString("; text-decoration: underline")
+		}
+		b.WriteString(" }\n")
+	}
 	return b.Bytes()
 }
 

@@ -47,8 +47,15 @@
 <div class="empty-diff">No changes to review.</div>
 {{end}}
 
+<div class="diff-layout">
+{{if .Tree}}
+<nav class="file-tree" aria-label="Changed files">
+  <ul>{{template "tree-nodes" .Tree}}</ul>
+</nav>
+{{end}}
+<div class="diff-files">
 {{range .Files}}
-<section class="file" data-path="{{.Path}}" data-fp="{{.Fingerprint}}">
+<section class="file" id="f-{{.Fingerprint}}" data-path="{{.Path}}" data-fp="{{.Fingerprint}}">
   <header class="file-header">
     <button class="icon-btn chevron" title="Collapse or expand this file">▾</button>
     <span class="file-status st-{{.Status}}">{{.Status}}</span>
@@ -90,6 +97,26 @@
     {{end}}
   </div>
 </section>
+{{end}}
+</div>
+</div>
+{{end}}
+
+{{define "tree-nodes"}}
+{{range .}}
+<li>
+{{if .IsDir}}
+  <details open>
+    <summary class="tree-dir">{{.Name}}</summary>
+    <ul>{{template "tree-nodes" .Children}}</ul>
+  </details>
+{{else}}
+  <a class="tree-file" href="#f-{{.Fingerprint}}" data-path="{{.Path}}" title="{{.Path}}">
+    <span class="tree-dot st-{{.Status}}"></span><span class="tree-name">{{.Name}}</span>
+    <span class="tree-check" title="Viewed">✓</span>
+  </a>
+{{end}}
+</li>
 {{end}}
 {{end}}
 

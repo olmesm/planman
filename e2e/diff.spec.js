@@ -94,6 +94,28 @@ test.describe("planman diff review flow", () => {
     await expect(resolved.locator(".reply .comment-author")).toHaveText("agent");
   });
 
+  test("file tree: nested dirs compress, entries jump to files, viewed syncs", async ({ page }) => {
+    app = await launchDiff();
+    app.repo.write("pkg/util/strings.go", "package util\n\nfunc Upper(s string) string { return s }\n");
+    await page.goto(app.url);
+
+    const tree = page.locator(".file-tree");
+    await expect(tree).toBeVisible();
+    // Single-child dir chain pkg/util is compressed into one label.
+    await expect(tree.locator("summary.tree-dir", { hasText: "pkg/util" })).toBeVisible();
+    await expect(tree.locator(".tree-file")).toHaveCount(3);
+
+    // Clicking a tree entry jumps to that file's card.
+    await tree.locator('.tree-file[data-path="pkg/util/strings.go"]').click();
+    await expect(page).toHaveURL(/#f-/);
+    const target = page.locator('.file[data-path="pkg/util/strings.go"]');
+    await expect(target).toBeInViewport();
+
+    // Marking a file viewed reflects in the tree.
+    await target.locator(".viewed-box").check();
+    await expect(tree.locator('.tree-file[data-path="pkg/util/strings.go"]')).toHaveClass(/viewed/);
+  });
+
   test("split view aligns old and new sides", async ({ page }) => {
     app = await launchDiff();
     await page.goto(app.url);

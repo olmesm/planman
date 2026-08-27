@@ -140,7 +140,7 @@ html, body {
 /* Layout */
 #main { padding: 1.5rem 1rem 6rem; }
 body[data-mode="doc"] #content { max-width: 860px; margin: 0 auto; }
-body[data-mode="diff"] #content { max-width: 1200px; margin: 0 auto; }
+body[data-mode="diff"] #content { max-width: 1440px; margin: 0 auto; }
 
 .section-label {
   font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
@@ -304,8 +304,66 @@ body[data-mode="diff"] #content { max-width: 1200px; margin: 0 auto; }
 .stat-del { color: var(--danger); font-weight: 600; }
 .empty-diff { text-align: center; color: var(--muted); padding: 3rem 0; }
 
+/* Layout: file tree beside the file cards */
+.diff-layout { display: flex; gap: 1.25rem; align-items: flex-start; }
+.diff-files { flex: 1; min-width: 0; }
+
+.file-tree {
+  position: sticky;
+  top: 3.8rem;
+  width: 240px;
+  flex-shrink: 0;
+  max-height: calc(100vh - 5rem);
+  overflow-y: auto;
+  font-size: 0.82rem;
+  padding-right: 0.25rem;
+}
+.file-tree ul { list-style: none; margin: 0; padding: 0 0 0 0.9rem; }
+.file-tree > ul { padding-left: 0; }
+.file-tree summary.tree-dir {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0.15rem 0.3rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  list-style-position: outside;
+}
+.file-tree summary.tree-dir:hover { background: var(--surface); }
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 6px;
+  color: var(--fg);
+  text-decoration: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: nowrap;
+}
+.tree-file:hover { background: var(--surface); }
+.tree-name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.tree-dot {
+  width: 0.5rem; height: 0.5rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--muted);
+}
+.tree-dot.st-added { background: var(--success); }
+.tree-dot.st-deleted { background: var(--danger); }
+.tree-dot.st-renamed, .tree-dot.st-modified { background: #d4a72c; }
+.tree-check { color: var(--success); visibility: hidden; font-weight: 700; }
+.tree-file.viewed { color: var(--muted); }
+.tree-file.viewed .tree-check { visibility: visible; }
+@media (max-width: 1000px) {
+  .file-tree { display: none; }
+}
+
 /* File cards */
 .file {
+  scroll-margin-top: 3.8rem;
   border: 1px solid var(--border);
   border-radius: 8px;
   margin-bottom: 1rem;

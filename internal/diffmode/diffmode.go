@@ -117,6 +117,7 @@ func (m *Mode) Content() (string, any, error) {
 	for _, f := range d.Files {
 		data.Files = append(data.Files, buildFileVM(f, view, placed[f.Path()]))
 	}
+	data.Tree = buildTree(data.Files)
 	return "diff", data, nil
 }
 
