@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/olmesm/planman/internal/critic"
+	"github.com/olmesm/planman/internal/review"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -25,13 +26,13 @@ type Block struct {
 	HTML      string
 	StartLine int // first body line of the block
 	EndLine   int // last body line of the block
-	Comments  []*critic.Comment
+	Comments  []*review.Comment
 }
 
 // Result is the fully rendered document.
 type Result struct {
 	Blocks       []Block
-	PageComments []*critic.Comment
+	PageComments []*review.Comment
 }
 
 var md = goldmark.New(
@@ -70,11 +71,11 @@ func Render(doc *critic.Document) (*Result, error) {
 	}
 
 	for _, c := range doc.Comments {
-		if c.Page {
+		if c.Anchor.Page {
 			res.PageComments = append(res.PageComments, c)
 			continue
 		}
-		bi := res.blockForLine(c.AnchorLine)
+		bi := res.blockForLine(c.Anchor.Line)
 		if bi < 0 {
 			res.PageComments = append(res.PageComments, c)
 			continue

@@ -3,37 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.File}} — planman</title>
+  <title>{{.Title}} — planman</title>
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/highlight.css">
   <script src="/assets/htmx.min.js"></script>
-  <script src="/assets/mermaid.min.js"></script>
+  {{if eq .Mode "doc"}}<script src="/assets/mermaid.min.js"></script>{{end}}
 </head>
-<body>
+<body data-mode="{{.Mode}}">
   <header class="topbar">
     <div class="topbar-left">
       <span class="logo">planman</span>
-      <span class="filename">{{.File}}</span>
+      <span class="filename">{{.Title}}</span>
     </div>
     <div class="topbar-right">
       <input id="author" name="author" type="text" placeholder="Your name" title="Comment author name">
       <button class="btn" id="page-comment-btn"
               hx-get="/comment-form?page=1" hx-target="#page-form-slot" hx-swap="innerHTML">
-        Comment on page
+        {{if eq .Mode "diff"}}Comment on review{{else}}Comment on page{{end}}
       </button>
+      {{if eq .Mode "doc"}}
       <button class="btn" id="open-editor-btn" hx-post="/editor" hx-swap="none"
               title="Opens $PLANMAN_EDITOR / $VISUAL / $EDITOR, or the system default">
         Open in editor
       </button>
+      {{end}}
+      <button class="btn" id="theme-toggle" title="Color theme: follows the OS; click to force light/dark">◐</button>
+      {{if not .Stay}}
       <button class="btn btn-primary" id="handback-btn"
-              hx-post="/handback" hx-target="#main" hx-swap="innerHTML">
+              hx-post="/handback" hx-target="#content" hx-swap="innerHTML">
         Hand back to agent
       </button>
+      {{end}}
     </div>
   </header>
   <main id="main">
-    <div id="doc">
-      {{template "doc" .}}
-    </div>
+    <div id="content">{{.Content}}</div>
   </main>
   <script src="/assets/app.js"></script>
 </body>

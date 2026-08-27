@@ -1,47 +1,67 @@
-// Package server implements the localhost review server for a single
-// markdown file. It renders the document with block-level comment UI,
-// persists comments back into the file, live-reloads on external edits,
-// and signals handback when the reviewer is done.
+// Package server is the localhost review server shell. It owns
+// everything common to every review surface — listening, security
+// middleware, templates, the SSE hub, comment-thread routes, the JSON
+// agent API, and handback — and delegates content rendering and comment
+// anchoring to a Mode (document review or diff review).
 package server
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/olmesm/planman/internal/critic"
-	"github.com/olmesm/planman/internal/render"
+	"github.com/olmesm/planman/internal/highlight"
+	"github.com/olmesm/planman/internal/review"
 	"github.com/olmesm/planman/web"
 )
 
-// Server serves a single markdown file for review.
-type Server struct {
-	Path     string // absolute path to the markdown file
-	Handback chan struct{}
+// Mode is one review surface. The server shell calls it for content and
+// anchors; the mode calls back into the hub when its source changes.
+type Mode interface {
+	// Name identifies the mode ("doc" or "diff") for templates and healthz.
+	Name() string
+	// Title is the human label shown in the top bar.
+	Title() string
+	// Store is the comment persistence backend.
+	Store() review.Store
+	// ApplyQuery folds view-affecting query parameters (scope, base,
+	// view) into the mode's current state.
+	ApplyQuery(q url.Values)
+	// Content returns the content template name and its data.
+	Content() (string, any, error)
+	// CommentForm returns the comment-form template name and data for
+	// the given request parameters.
+	CommentForm(q url.Values) (string, any, error)
+	// Anchor derives a comment anchor from posted form values.
+	Anchor(v url.Values) (review.Anchor, error)
+	// Watch starts change detection, invoking onChange on every change.
+	Watch(onChange func()) error
+	// RegisterRoutes adds mode-specific routes.
+	RegisterRoutes(mux *http.ServeMux, s *Server)
+	// Healthz returns mode-specific identity fields for /healthz.
+	Healthz() map[string]any
+}
 
-	mu       sync.Mutex // guards file read-modify-write
+// Server serves one review session.
+type Server struct {
+	Handback chan struct{}
+	Stay     bool // hide handback and run until interrupted
+
+	mode     Mode
 	tmpl     *template.Template
 	hub      *hub
 	handOnce sync.Once
 	host     string // populated once listening, for origin checks
 }
 
-// New creates a server for the given file.
-func New(path string) (*Server, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := os.Stat(abs); err != nil {
-		return nil, fmt.Errorf("cannot open %s: %w", path, err)
-	}
+// New creates a server around the given mode.
+func New(mode Mode, stay bool) (*Server, error) {
 	funcs := template.FuncMap{
 		"raw": func(s string) template.HTML { return template.HTML(s) },
 		"fmtTime": func(t time.Time) string {
@@ -56,15 +76,31 @@ func New(path string) (*Server, error) {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
 	s := &Server{
-		Path:     abs,
 		Handback: make(chan struct{}),
+		Stay:     stay,
+		mode:     mode,
 		tmpl:     tmpl,
 		hub:      newHub(),
 	}
-	if err := s.watch(); err != nil {
+	if err := mode.Watch(s.hub.broadcast); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// Mode returns the server's mode.
+func (s *Server) Mode() Mode { return s.mode }
+
+// Broadcast tells connected pages to re-fetch content.
+func (s *Server) Broadcast() { s.hub.broadcast() }
+
+// CommentCounts returns (total, open) thread counts.
+func (s *Server) CommentCounts() (int, int) {
+	cs, err := s.mode.Store().List()
+	if err != nil {
+		return 0, 0
+	}
+	return len(cs), review.CountOpen(cs)
 }
 
 // Listen binds to 127.0.0.1 on the given port (0 for ephemeral) and
@@ -78,19 +114,38 @@ func (s *Server) Listen(port int) (net.Listener, string, error) {
 	return ln, "http://" + s.host, nil
 }
 
+// ListenRange binds to the first free port in [from, to], for servers
+// that agents discover by port scanning.
+func (s *Server) ListenRange(from, to int) (net.Listener, string, error) {
+	for port := from; port <= to; port++ {
+		ln, url, err := s.Listen(port)
+		if err == nil {
+			return ln, url, nil
+		}
+	}
+	return nil, "", fmt.Errorf("no free port in %d-%d", from, to)
+}
+
 // Handler returns the HTTP handler with security middleware applied.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handlePage)
-	mux.HandleFunc("GET /doc", s.handleDocFragment)
+	mux.HandleFunc("GET /content", s.handleContent)
 	mux.HandleFunc("GET /comment-form", s.handleCommentForm)
 	mux.HandleFunc("POST /comments", s.handleAddComment)
 	mux.HandleFunc("POST /comments/{id}/reply", s.handleReply)
+	mux.HandleFunc("POST /comments/{id}/resolve", s.handleStatus(review.StatusResolved))
+	mux.HandleFunc("POST /comments/{id}/reopen", s.handleStatus(review.StatusOpen))
 	mux.HandleFunc("DELETE /comments/{id}", s.handleDelete)
-	mux.HandleFunc("POST /editor", s.handleEditor)
 	mux.HandleFunc("POST /handback", s.handleHandback)
 	mux.HandleFunc("GET /events", s.handleEvents)
+	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("GET /api/comments", s.handleAPIList)
+	mux.HandleFunc("PATCH /api/comments/{id}", s.handleAPIPatch)
+	mux.HandleFunc("POST /api/comments/{id}/reply", s.handleAPIReply)
+	mux.HandleFunc("GET /assets/highlight.css", handleHighlightCSS)
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServerFS(web.AssetsFS())))
+	s.mode.RegisterRoutes(mux, s)
 	return s.guard(mux)
 }
 
@@ -138,66 +193,22 @@ func localHost(host, bound string) bool {
 	return h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "[::1]"
 }
 
-// load reads and parses the current file contents.
-func (s *Server) load() (*critic.Document, error) {
-	b, err := os.ReadFile(s.Path)
-	if err != nil {
-		return nil, err
-	}
-	return critic.Parse(string(b)), nil
-}
-
-// save writes the document atomically (temp file + rename).
-func (s *Server) save(doc *critic.Document) error {
-	dir := filepath.Dir(s.Path)
-	tmp, err := os.CreateTemp(dir, ".planman-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(doc.Serialize()); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), s.Path)
-}
-
-// mutate runs fn against the parsed document and saves the result.
-func (s *Server) mutate(fn func(*critic.Document) error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	doc, err := s.load()
-	if err != nil {
-		return err
-	}
-	if err := fn(doc); err != nil {
-		return err
-	}
-	return s.save(doc)
-}
-
-// CommentCount returns the number of comment threads currently in the file.
-func (s *Server) CommentCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	doc, err := s.load()
-	if err != nil {
-		return 0
-	}
-	return len(doc.Comments)
+func handleHighlightCSS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	_, _ = w.Write(highlight.Stylesheet())
 }
 
 func (s *Server) triggerHandback() {
 	s.handOnce.Do(func() { close(s.Handback) })
 }
 
-var _ = render.EscapeForDisplay // keep linkage explicit
+var errNotFound = errors.New("not found")
 
-func fileTitle(path string) string {
-	return filepath.Base(path)
+func httpStatusFor(err error) int {
+	if errors.Is(err, review.ErrNotFound) || errors.Is(err, errNotFound) {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
 }
 
 func trimText(s string, n int) string {

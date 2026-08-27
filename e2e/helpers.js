@@ -1,5 +1,5 @@
 // @ts-check
-const { spawn } = require("child_process");
+const { spawn, execFileSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -34,22 +34,9 @@ graph TD;
 `;
 
 /**
- * Launch a planman instance on a fresh copy of the fixture (or given
- * content). Resolves with the URL once the server reports ready.
+ * Spawn a planman command and wait for its ready event.
  */
-async function launch(opts = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "planman-e2e-"));
-  const file = path.join(dir, "doc.md");
-  fs.writeFileSync(file, opts.content ?? FIXTURE);
-
-  const args = [
-    "open",
-    file,
-    "--json",
-    "--no-browser",
-    "--timeout",
-    opts.timeout ?? "120s",
-  ];
+function spawnPlanman(args) {
   const proc = spawn(BIN, args, { stdio: ["ignore", "pipe", "pipe"] });
 
   const stdout = [];
@@ -81,17 +68,17 @@ async function launch(opts = {}) {
     proc.on("exit", (code) => resolve(code));
   });
 
-  const url = await new Promise((resolve, reject) => {
+  const ready = new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error(`no ready event; stderr: ${stderr}`)),
       15_000
     );
     const poll = setInterval(() => {
-      const ready = events.find((e) => e.event === "ready");
-      if (ready) {
+      const ev = events.find((e) => e.event === "ready");
+      if (ev) {
         clearTimeout(timer);
         clearInterval(poll);
-        resolve(ready.url);
+        resolve(ev.url);
       }
     }, 50);
     exited.then((code) => {
@@ -101,17 +88,36 @@ async function launch(opts = {}) {
     });
   });
 
+  return { proc, events, exited, ready };
+}
+
+/**
+ * Launch a doc review on a fresh copy of the fixture (or given content).
+ */
+async function launch(opts = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "planman-e2e-"));
+  const file = path.join(dir, "doc.md");
+  fs.writeFileSync(file, opts.content ?? FIXTURE);
+
+  const app = spawnPlanman([
+    "open",
+    file,
+    "--json",
+    "--no-browser",
+    "--timeout",
+    opts.timeout ?? "120s",
+  ]);
+  const url = await app.ready;
+
   return {
-    proc,
+    ...app,
     url,
     file,
-    events,
-    exited,
     read: () => fs.readFileSync(file, "utf8"),
     append: (text) => fs.appendFileSync(file, text),
     kill: () => {
       try {
-        proc.kill("SIGKILL");
+        app.proc.kill("SIGKILL");
       } catch {
         /* already gone */
       }
@@ -119,4 +125,68 @@ async function launch(opts = {}) {
   };
 }
 
-module.exports = { launch, FIXTURE, BIN };
+/**
+ * Build a git repo fixture: a base commit, a committed change on a
+ * feature branch, a working-tree edit, and an untracked file.
+ */
+function makeRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "planman-e2e-repo-"));
+  const git = (...args) =>
+    execFileSync("git", ["-C", dir, ...args], {
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "t",
+        GIT_AUTHOR_EMAIL: "t@t",
+        GIT_COMMITTER_NAME: "t",
+        GIT_COMMITTER_EMAIL: "t@t",
+      },
+    });
+  const write = (name, content) =>
+    fs.writeFileSync(path.join(dir, name), content);
+
+  git("init", "-b", "main");
+  write(
+    "main.go",
+    'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("hello")\n}\n'
+  );
+  git("add", ".");
+  git("commit", "-m", "base");
+  git("checkout", "-b", "feature");
+  write(
+    "main.go",
+    'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("hello, planman")\n}\n'
+  );
+  write("notes.txt", "remember the milk\n");
+  return { dir, git, write };
+}
+
+/**
+ * Launch a diff review over a fresh repo fixture.
+ */
+async function launchDiff(opts = {}) {
+  const repo = opts.repo ?? makeRepo();
+  const args = ["diff", repo.dir, "--json", "--no-browser", "--timeout", opts.timeout ?? "120s"];
+  if (opts.scope) args.push("--scope", opts.scope);
+  if (opts.base) args.push("--base", opts.base);
+  const app = spawnPlanman(args);
+  const url = await app.ready;
+
+  return {
+    ...app,
+    url,
+    repo,
+    readStore: () => {
+      const p = path.join(repo.dir, ".git", "planman", "review.json");
+      return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : null;
+    },
+    kill: () => {
+      try {
+        app.proc.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    },
+  };
+}
+
+module.exports = { launch, launchDiff, makeRepo, FIXTURE, BIN };

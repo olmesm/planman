@@ -25,9 +25,37 @@ test.describe("planman review flow", () => {
     await page.goto(app.url);
     const highlight = page.locator('.highlight[data-lang="go"]');
     await expect(highlight).toBeVisible();
-    // chroma emits inline-styled spans; the keyword "package" gets a color
+    // chroma emits class-based spans, themed by /assets/highlight.css
     const html = await highlight.innerHTML();
-    expect(html).toMatch(/<span style="color:[^"]+">package<\/span>/);
+    expect(html).toMatch(/<span class="kn">package<\/span>/);
+    const color = await highlight
+      .locator(".kn")
+      .first()
+      .evaluate((el) => getComputedStyle(el).color);
+    expect(color).not.toBe("rgb(0, 0, 0)");
+  });
+
+  test("resolve and reopen a thread, status persists in the file", async ({ page }) => {
+    app = await launch();
+    await page.goto(app.url);
+    await page.fill("#author", "reviewer");
+
+    const block = page.locator('[data-block="1"]');
+    await block.hover();
+    await block.locator(".add-comment-btn").click();
+    await page.fill('#form-slot-1 textarea[name="text"]', "needs a source");
+    await page.click('#form-slot-1 button[type="submit"]');
+    const comment = page.locator(".comment", { hasText: "needs a source" });
+    await expect(comment).toBeVisible();
+
+    await comment.locator(".resolve-btn").click();
+    const resolved = page.locator(".comment.resolved", { hasText: "needs a source" });
+    await expect(resolved).toBeVisible();
+    expect(app.read()).toContain("status: resolved");
+
+    await resolved.locator(".reopen-btn").click();
+    await expect(page.locator(".comment.resolved")).toHaveCount(0);
+    expect(app.read()).not.toContain("status: resolved");
   });
 
   test("mermaid diagrams render to SVG in the browser", async ({ page }) => {

@@ -1,16 +1,10 @@
 package server
 
 import (
-	"errors"
 	"net/http"
-	"path/filepath"
 	"sync"
 	"time"
-
-	"github.com/fsnotify/fsnotify"
 )
-
-var errNotFound = errors.New("not found")
 
 // hub fans out change notifications to connected SSE clients.
 type hub struct {
@@ -47,46 +41,6 @@ func (h *hub) broadcast() {
 	}
 }
 
-// watch monitors the file's directory (editors save via rename, which
-// breaks per-file watches) and broadcasts debounced change events.
-func (s *Server) watch() error {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	if err := watcher.Add(filepath.Dir(s.Path)); err != nil {
-		watcher.Close()
-		return err
-	}
-	name := filepath.Base(s.Path)
-	go func() {
-		var timer *time.Timer
-		for {
-			select {
-			case ev, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				if filepath.Base(ev.Name) != name {
-					continue
-				}
-				if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
-					continue
-				}
-				if timer != nil {
-					timer.Stop()
-				}
-				timer = time.AfterFunc(150*time.Millisecond, s.hub.broadcast)
-			case _, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-			}
-		}
-	}()
-	return nil
-}
-
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -110,7 +64,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ch:
-			_, _ = w.Write([]byte("event: change\ndata: file\n\n"))
+			_, _ = w.Write([]byte("event: change\ndata: source\n\n"))
 			flusher.Flush()
 		case <-keepalive.C:
 			_, _ = w.Write([]byte(": ping\n\n"))

@@ -28,12 +28,22 @@
 {{end}}
 
 {{define "comment"}}
-<div class="comment" id="comment-{{.ID}}" data-comment-id="{{.ID}}">
+<div class="comment{{if .Resolved}} resolved{{end}}" id="comment-{{.ID}}" data-comment-id="{{.ID}}">
   <div class="comment-head">
     <span class="comment-author">{{if .Author}}{{.Author}}{{else}}anonymous{{end}}</span>
     <span class="comment-ts">{{fmtTime .Ts}}</span>
-    <button class="icon-btn delete-btn" title="Delete comment thread"
-            hx-delete="/comments/{{.ID}}" hx-target="#doc" hx-swap="innerHTML">×</button>
+    {{if .Resolved}}<span class="status-chip">Resolved</span>{{end}}
+    <span class="comment-actions">
+      {{if .Resolved}}
+      <button class="btn btn-small reopen-btn" title="Reopen this thread"
+              hx-post="/comments/{{.ID}}/reopen" hx-target="#content" hx-swap="innerHTML">Reopen</button>
+      {{else}}
+      <button class="btn btn-small resolve-btn" title="Resolve this thread"
+              hx-post="/comments/{{.ID}}/resolve" hx-target="#content" hx-swap="innerHTML">Resolve</button>
+      {{end}}
+      <button class="icon-btn delete-btn" title="Delete comment thread"
+              hx-delete="/comments/{{.ID}}" hx-target="#content" hx-swap="innerHTML">×</button>
+    </span>
   </div>
   <div class="comment-text">{{.Text}}</div>
   {{range .Replies}}
@@ -45,7 +55,7 @@
     <div class="comment-text">{{.Text}}</div>
   </div>
   {{end}}
-  <form class="reply-form" hx-post="/comments/{{.ID}}/reply" hx-target="#doc"
+  <form class="reply-form" hx-post="/comments/{{.ID}}/reply" hx-target="#content"
         hx-swap="innerHTML" hx-include="#author">
     <input type="text" name="text" placeholder="Reply…" required>
     <button type="submit" class="btn btn-small">Reply</button>
@@ -53,28 +63,27 @@
 </div>
 {{end}}
 
-{{define "comment-form"}}
-<form class="comment-form" hx-post="/comments" hx-target="#doc" hx-swap="innerHTML"
+{{define "comment-form-inner"}}
+<form class="comment-form" hx-post="/comments" hx-target="#content" hx-swap="innerHTML"
       hx-include="#author">
-  {{if .Page}}
-  <input type="hidden" name="page" value="1">
-  {{else}}
-  <input type="hidden" name="block" value="{{.Block}}">
-  {{end}}
-  <textarea name="text" rows="3" required
-            placeholder="{{if .Page}}Comment on the whole document…{{else}}Comment on this block…{{end}}"></textarea>
+  {{range $k, $v := .Fields}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}
+  <textarea name="text" rows="3" required placeholder="{{.Placeholder}}"></textarea>
   <div class="form-actions">
     <button type="submit" class="btn btn-primary btn-small">Comment</button>
     <button type="button" class="btn btn-small"
-            onclick="this.closest('.comment-form').remove()">Cancel</button>
+            onclick="var tr=this.closest('tr.form-row'); (tr||this.closest('.comment-form')).remove()">Cancel</button>
   </div>
 </form>
+{{end}}
+
+{{define "comment-form"}}
+{{template "comment-form-inner" .}}
 {{end}}
 
 {{define "handback"}}
 <div class="handback-done">
   <h1>Handed back ✓</h1>
-  <p>Your review was saved into the markdown file and control was returned
-     to the agent. You can close this tab.</p>
+  <p>Your review was saved and control was returned to the agent.
+     You can close this tab.</p>
 </div>
 {{end}}

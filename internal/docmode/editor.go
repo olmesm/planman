@@ -1,4 +1,4 @@
-package server
+package docmode
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 // openInEditor launches the user's preferred editor on the file.
 // Preference order: $PLANMAN_EDITOR, $VISUAL, $EDITOR, then the platform
 // opener. Terminal editors (vim, nano) won't work when spawned from the
-// server — set a GUI editor (e.g. "code", "subl") for the editor link.
+// server — set a GUI editor (e.g. "code", "subl") for the editor button.
 func openInEditor(path string) error {
 	for _, env := range []string{"PLANMAN_EDITOR", "VISUAL", "EDITOR"} {
 		if cmd := strings.TrimSpace(os.Getenv(env)); cmd != "" {
@@ -37,18 +37,3 @@ func startDetached(cmd *exec.Cmd) error {
 	go func() { _ = cmd.Wait() }()
 	return nil
 }
-
-// openBrowser opens the given URL in the default browser.
-func openBrowser(url string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", url).Start()
-	case "windows":
-		return exec.Command("cmd", "/c", "start", "", url).Start()
-	default:
-		return exec.Command("xdg-open", url).Start()
-	}
-}
-
-// OpenBrowser is the exported browser opener used by the CLI.
-func OpenBrowser(url string) error { return openBrowser(url) }

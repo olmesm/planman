@@ -1,0 +1,166 @@
+{{define "diff"}}
+<section id="page-comments" class="page-comments">
+  {{if .PageComments}}
+  <h2 class="section-label">Review comments</h2>
+  {{range .PageComments}}
+    {{template "comment" .}}
+  {{end}}
+  {{end}}
+  <div id="page-form-slot"></div>
+</section>
+
+{{if .Detached}}
+<section class="detached">
+  <h2 class="section-label">Threads on files no longer in this diff</h2>
+  {{range .Detached}}
+  <div class="orphan">
+    <div class="orphan-loc"><code>{{.Anchor.File}}</code> {{.Anchor.Side}} line {{.Anchor.Line}}</div>
+    {{template "comment" .}}
+  </div>
+  {{end}}
+</section>
+{{end}}
+
+<div class="diff-toolbar">
+  <span class="diff-summary">
+    {{.NumFiles}} changed file{{if ne .NumFiles 1}}s{{end}}
+    <span class="stat-add">+{{.TotalAdds}}</span>
+    <span class="stat-del">−{{.TotalDels}}</span>
+  </span>
+  <span class="diff-controls">
+    <select class="scope-select" name="scope" title="Which changes to show"
+            hx-get="/content" hx-target="#content" hx-swap="innerHTML">
+      <option value="working" {{if eq .Scope "working"}}selected{{end}}>Working tree vs HEAD</option>
+      <option value="branch" {{if eq .Scope "branch"}}selected{{end}}>Branch vs {{.Base}}</option>
+      <option value="all" {{if eq .Scope "all"}}selected{{end}}>Everything since {{.Base}}</option>
+    </select>
+    <span class="view-toggle">
+      <button class="btn btn-small{{if eq .View "unified"}} active{{end}}"
+              hx-get="/content?view=unified" hx-target="#content" hx-swap="innerHTML">Unified</button>
+      <button class="btn btn-small{{if eq .View "split"}} active{{end}}"
+              hx-get="/content?view=split" hx-target="#content" hx-swap="innerHTML">Split</button>
+    </span>
+  </span>
+</div>
+
+{{if not .Files}}
+<div class="empty-diff">No changes to review.</div>
+{{end}}
+
+{{range .Files}}
+<section class="file" data-path="{{.Path}}" data-fp="{{.Fingerprint}}">
+  <header class="file-header">
+    <button class="icon-btn chevron" title="Collapse or expand this file">▾</button>
+    <span class="file-status st-{{.Status}}">{{.Status}}</span>
+    <span class="file-path">{{.DisplayPath}}</span>
+    <button class="icon-btn copy-path" title="Copy file path" data-path="{{.Path}}">⧉</button>
+    <span class="file-stats">
+      {{if .Binary}}BIN{{else}}<span class="stat-add">+{{.Additions}}</span> <span class="stat-del">−{{.Deletions}}</span>{{end}}
+    </span>
+    <label class="viewed-label" title="Mark this file as reviewed">
+      <input type="checkbox" class="viewed-box"> Viewed
+    </label>
+  </header>
+  <div class="file-body">
+    {{if .Binary}}
+    <div class="binary-note">Binary file not shown</div>
+    {{else if and (eq (len .SRows) 0) (eq (len .URows) 0)}}
+    <div class="binary-note">No content changes</div>
+    {{else if .SRows}}
+    <table class="diff-table split">
+      <colgroup><col class="col-num"><col class="col-code"><col class="col-num"><col class="col-code"></colgroup>
+      <tbody>{{template "diff-split-rows" .SRows}}</tbody>
+    </table>
+    {{else}}
+    <table class="diff-table unified">
+      <colgroup><col class="col-num"><col class="col-num"><col class="col-code"></colgroup>
+      <tbody>{{template "diff-unified-rows" .URows}}</tbody>
+    </table>
+    {{end}}
+    {{if .Orphans}}
+    <div class="orphans">
+      <div class="section-label">Comments on lines not shown in the diff</div>
+      {{range .Orphans}}
+      <div class="orphan">
+        <div class="orphan-loc">{{.Side}} line {{.Line}}{{if .Context}}: <code>{{.Context}}</code>{{end}}</div>
+        {{template "comment" .Comment}}
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+</section>
+{{end}}
+{{end}}
+
+{{define "diff-unified-rows"}}
+{{range .}}
+{{if eq .Kind "hunk"}}
+<tr class="hunk-row"><td class="num"></td><td class="num"></td><td class="code hunk-head">{{.Header}}</td></tr>
+{{else if eq .Kind "expander"}}
+<tr class="expander-row"><td colspan="3">
+  <button class="expander-btn"
+          hx-get="/expand?file={{urlquery .Exp.File}}&old={{.Exp.OldStart}}&new={{.Exp.NewStart}}&count={{.Exp.Count}}"
+          hx-target="closest tr" hx-swap="outerHTML">
+    ⇕ {{if lt .Exp.Count 0}}Expand to end of file{{else}}Expand {{.Exp.Count}} hidden line{{if ne .Exp.Count 1}}s{{end}}{{end}}
+  </button>
+</td></tr>
+{{else}}
+<tr class="line {{.LineKind}}">
+  <td class="num old">{{if .OldNo}}{{.OldNo}}{{end}}</td>
+  <td class="num new">{{if .NewNo}}{{.NewNo}}{{end}}</td>
+  <td class="code chroma"><button class="add-comment-btn" title="Comment on this line"
+        hx-get="/comment-form?file={{urlquery .File}}&side={{.Side}}&line={{.Line}}&context={{urlquery .Context}}"
+        hx-target="closest tr" hx-swap="afterend">+</button><span class="marker">{{.Marker}}</span><span class="code-text">{{.HTML}}</span></td>
+</tr>
+{{if .Threads}}
+<tr class="thread-row"><td colspan="3"><div class="thread-cell">
+  {{range .Threads}}{{template "comment" .}}{{end}}
+</div></td></tr>
+{{end}}
+{{end}}
+{{end}}
+{{end}}
+
+{{define "diff-split-rows"}}
+{{range .}}
+{{if eq .Kind "hunk"}}
+<tr class="hunk-row"><td class="num"></td><td class="code hunk-head" colspan="3">{{.Header}}</td></tr>
+{{else if eq .Kind "expander"}}
+<tr class="expander-row"><td colspan="4">
+  <button class="expander-btn"
+          hx-get="/expand?file={{urlquery .Exp.File}}&old={{.Exp.OldStart}}&new={{.Exp.NewStart}}&count={{.Exp.Count}}"
+          hx-target="closest tr" hx-swap="outerHTML">
+    ⇕ {{if lt .Exp.Count 0}}Expand to end of file{{else}}Expand {{.Exp.Count}} hidden line{{if ne .Exp.Count 1}}s{{end}}{{end}}
+  </button>
+</td></tr>
+{{else}}
+<tr class="line">
+  {{template "split-cell" .L}}
+  {{template "split-cell" .R}}
+</tr>
+{{if .Threads}}
+<tr class="thread-row"><td colspan="4"><div class="thread-cell">
+  {{range .Threads}}{{template "comment" .}}{{end}}
+</div></td></tr>
+{{end}}
+{{end}}
+{{end}}
+{{end}}
+
+{{define "split-cell"}}
+{{if eq .Kind "empty"}}
+<td class="num"></td><td class="code empty"></td>
+{{else}}
+<td class="num {{.Kind}}">{{.No}}</td>
+<td class="code chroma {{.Kind}}"><button class="add-comment-btn" title="Comment on this line"
+      hx-get="/comment-form?file={{urlquery .File}}&side={{.Side}}&line={{.Line}}&context={{urlquery .Context}}"
+      hx-target="closest tr" hx-swap="afterend">+</button><span class="code-text">{{.HTML}}</span></td>
+{{end}}
+{{end}}
+
+{{define "diff-comment-form"}}
+<tr class="form-row"><td colspan="{{.Colspan}}">
+{{template "comment-form-inner" .}}
+</td></tr>
+{{end}}

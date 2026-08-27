@@ -11,5 +11,7 @@ require (
 
 require (
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+	github.com/sergi/go-diff v1.4.0 // indirect
+	github.com/sourcegraph/go-diff v0.8.0 // indirect
 	golang.org/x/sys v0.13.0 // indirect
 )

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/olmesm/planman/internal/critic"
+	"github.com/olmesm/planman/internal/review"
 )
 
 func TestRenderBlocksAndGFM(t *testing.T) {
@@ -41,15 +42,15 @@ func TestRenderMermaidAndCode(t *testing.T) {
 	if !strings.Contains(all, `<pre class="mermaid">graph TD;`) {
 		t.Errorf("mermaid block not passed through:\n%s", all)
 	}
-	if !strings.Contains(all, `class="highlight"`) || !strings.Contains(all, "style=") {
-		t.Errorf("go block not chroma-highlighted:\n%s", all)
+	if !strings.Contains(all, `class="highlight"`) || !strings.Contains(all, `<pre class="chroma">`) {
+		t.Errorf("go block not chroma-highlighted with classes:\n%s", all)
 	}
 }
 
 func TestCommentAttachesToBlock(t *testing.T) {
 	doc := critic.Parse("Para one.\n\nPara two.\n\nPara three.\n")
 	// anchor at line 2 = "Para two."
-	doc.AddBlockComment(2, "note", "r", time.Now())
+	doc.AddComment(review.Anchor{Line: 2}, "r", "note", time.Now())
 	res, err := Render(doc)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +68,7 @@ func TestCommentAttachesToBlock(t *testing.T) {
 
 func TestPageCommentsSeparated(t *testing.T) {
 	doc := critic.Parse("Para.\n")
-	doc.AddPageComment("whole doc note", "r", time.Now())
+	doc.AddComment(review.Anchor{Page: true}, "r", "whole doc note", time.Now())
 	res, err := Render(doc)
 	if err != nil {
 		t.Fatal(err)
