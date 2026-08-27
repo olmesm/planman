@@ -17,6 +17,8 @@ agent to read — no database, no cloud, no auth, no CDN.
 └──────────┘   {"event":"handback", ...}     └─────────┘
 ```
 
+![The review UI: a rendered plan with an inline comment thread and a mermaid diagram](docs/review.png)
+
 ## Install
 
 Grab a binary from [Releases](../../releases) — Linux, macOS, and Windows,
@@ -73,6 +75,10 @@ open in your editor already. The page live-reloads on every save.
 - Raw inline HTML
 
 ## Comment format
+
+Hover any block, hit **+**, and write:
+
+![Adding a comment to a syntax-highlighted code block](docs/comment.png)
 
 Block comments live in the file, next to their block:
 
