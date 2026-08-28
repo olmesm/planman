@@ -436,23 +436,28 @@ func (m *Mode) Anchor(v url.Values) (review.Anchor, error) {
 
 // Watch implements server.Mode: poll the repository state (HEAD,
 // worktree status, and the selected endpoints) and fire on any change.
+// A poll whose selected range differs from the previous poll's resyncs
+// silently: the reviewer just navigated, and the page already rendered
+// the new comparison — only repository changes are worth announcing.
 func (m *Mode) Watch(onChange func()) error {
-	fingerprint := func() string {
+	fingerprint := func() (rangeKey, fp string) {
 		st := m.state()
 		b, _ := m.repo.ResolveSHA(st.base)
 		h := ""
 		if !gitdiff.IsPseudo(st.head) {
 			h, _ = m.repo.ResolveSHA(st.head)
 		}
-		return m.repo.StateFingerprint() + "\x00" + b + "\x00" + h
+		return st.base + "\x00" + st.head, m.repo.StateFingerprint() + "\x00" + b + "\x00" + h
 	}
-	last := fingerprint()
+	lastRange, last := fingerprint()
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			if fp := fingerprint(); fp != last {
-				last = fp
+			rangeKey, fp := fingerprint()
+			changed := fp != last && rangeKey == lastRange
+			lastRange, last = rangeKey, fp
+			if changed {
 				onChange()
 			}
 		}

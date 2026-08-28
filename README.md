@@ -31,6 +31,8 @@ No database, no cloud, no auth, no CDN.
 
 ![The same review in split view with the dark theme](docs/split.png)
 
+![An agent-authored walkthrough: chapter rail, prose beside the live hunk, and an inline comment thread](docs/walkthrough.png)
+
 ![A rendered markdown plan with an inline comment thread and a mermaid diagram](docs/review.png)
 
 ## Install
