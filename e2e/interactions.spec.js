@@ -38,6 +38,19 @@ test.describe("chrome", () => {
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("main.go");
   });
 
+  test("changing the comparison never raises the refresh banner", async ({ page }) => {
+    app = await launchDiff();
+    await page.goto(app.url);
+
+    await page.click("#history-toggle");
+    await page.locator(".hist-row:not(.pseudo)").last().click({ modifiers: ["Shift"] });
+    await expect(page.locator(".hist-row.sel-base")).toBeVisible();
+    // The watcher polls once a second; give it a few cycles to be sure
+    // the range switch is not misread as a repository change.
+    await page.waitForTimeout(2500);
+    await expect(page.locator("#refresh-banner")).toBeHidden();
+  });
+
   test("Mod+B and drag-to-closed both collapse the sidebar", async ({ page }) => {
     app = await launchDiff();
     await page.goto(app.url);
