@@ -51,6 +51,12 @@
             title="List every file at the head endpoint in the sidebar, not just changed ones"
             hx-get="/content?files={{if .AllFiles}}changed{{else}}all{{end}}"
             hx-target="#content" hx-swap="innerHTML">all files</button>
+    <button class="btn btn-small toggle-btn{{if .IgnoreWS}} active{{end}}" id="ws-toggle"
+            title="Hide whitespace-only changes (git diff -w)"
+            hx-get="/content?ws={{if .IgnoreWS}}0{{else}}1{{end}}"
+            hx-target="#content" hx-swap="innerHTML">hide whitespace</button>
+    <button class="btn btn-small" id="copy-review-btn"
+            title="Copy all review comments as markdown">Copy review</button>
     <span class="view-toggle">
       <button class="btn btn-small{{if eq .View "unified"}} active{{end}}"
               hx-get="/content?view=unified" hx-target="#content" hx-swap="innerHTML">Unified</button>
@@ -113,6 +119,7 @@
   </nav>
   {{end}}
 </div>
+<div class="sidebar-handle" title="Drag to resize the sidebar; drag closed to collapse"></div>
 {{end}}
 <div class="diff-files">
 {{range .Files}}

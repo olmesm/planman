@@ -24,6 +24,7 @@ type contentData struct {
 	MergeBase    bool
 	View         string // "unified" | "split"
 	AllFiles     bool
+	IgnoreWS     bool
 	Files        []*fileVM
 	Tree         []*treeNode
 	History      []*histRow

@@ -29,6 +29,7 @@ type rangeState struct {
 	mergeBase bool
 	view      string // "unified" | "split"
 	allFiles  bool
+	ignoreWS  bool
 }
 
 // Mode reviews a repository's diff.
@@ -104,7 +105,7 @@ func (m *Mode) ApplyQuery(q url.Values) {
 	defer m.mu.Unlock()
 	if p := q.Get("preset"); p != "" {
 		if st, err := m.preset(p); err == nil {
-			st.view, st.allFiles = m.st.view, m.st.allFiles
+			st.view, st.allFiles, st.ignoreWS = m.st.view, m.st.allFiles, m.st.ignoreWS
 			m.st = st
 		}
 	}
@@ -119,6 +120,9 @@ func (m *Mode) ApplyQuery(q url.Values) {
 	}
 	if v := q.Get("files"); v != "" {
 		m.st.allFiles = v == "all"
+	}
+	if v := q.Get("ws"); v != "" {
+		m.st.ignoreWS = v == "1"
 	}
 	switch q.Get("view") {
 	case "split":
@@ -154,7 +158,7 @@ func headLabel(ref string) string {
 func (m *Mode) Content() (string, any, error) {
 	st := m.state()
 	d, err := m.repo.DiffRange(gitdiff.RangeOptions{
-		Base: st.base, Head: st.head, MergeBase: st.mergeBase,
+		Base: st.base, Head: st.head, MergeBase: st.mergeBase, IgnoreWhitespace: st.ignoreWS,
 	})
 	if err != nil {
 		return "", nil, err
@@ -173,6 +177,7 @@ func (m *Mode) Content() (string, any, error) {
 		MergeBase: st.mergeBase,
 		View:      st.view,
 		AllFiles:  st.allFiles,
+		IgnoreWS:  st.ignoreWS,
 		NumFiles:  len(d.Files),
 		TotalAdds: d.TotalAdditions(),
 		TotalDels: d.TotalDeletions(),
@@ -437,6 +442,15 @@ func (m *Mode) RegisterRoutes(mux *http.ServeMux, s *server.Server) {
 	})
 	mux.HandleFunc("GET /file", func(w http.ResponseWriter, r *http.Request) {
 		m.handleFullFile(w, r, s)
+	})
+	mux.HandleFunc("GET /export.md", func(w http.ResponseWriter, r *http.Request) {
+		md, err := m.ExportMarkdown(time.Now())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_, _ = w.Write([]byte(md))
 	})
 }
 

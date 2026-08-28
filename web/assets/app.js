@@ -86,6 +86,7 @@
     });
     var panel = document.getElementById("history-panel");
     if (panel) panel.hidden = localStorage.getItem("planman-history-open") !== "1";
+    applySidebar();
   }
 
   // --- History navigator: pick compare/base endpoints from the graph.
@@ -178,8 +179,13 @@
     if (!e.target.classList.contains("viewed-box")) return;
     var file = e.target.closest(".file");
     var state = viewedState();
-    if (e.target.checked) state[file.dataset.path] = file.dataset.fp;
-    else delete state[file.dataset.path];
+    if (e.target.checked) {
+      state[file.dataset.path] = file.dataset.fp;
+      collapsed[file.dataset.path] = true; // viewed files fold away
+    } else {
+      delete state[file.dataset.path];
+      delete collapsed[file.dataset.path];
+    }
     saveViewed(state);
     applyFileState();
   });
@@ -198,7 +204,74 @@
         copy.textContent = "✓";
         setTimeout(function () { copy.textContent = "⧉"; }, 1200);
       });
+      return;
     }
+    var copyReview = e.target.closest("#copy-review-btn");
+    if (copyReview) {
+      fetch("/export.md").then(function (r) { return r.text(); }).then(function (text) {
+        return navigator.clipboard.writeText(text);
+      }).then(function () {
+        copyReview.textContent = "Copied ✓";
+        setTimeout(function () { copyReview.textContent = "Copy review"; }, 1500);
+      });
+    }
+  });
+
+  // --- Resizable / collapsible sidebar. Width is a CSS variable on the
+  // layout; drag past the collapse threshold folds the sidebar away.
+  var SIDEBAR_KEY = "planman-sidebar";
+  function sidebarPrefs() {
+    try {
+      return JSON.parse(localStorage.getItem(SIDEBAR_KEY)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function applySidebar() {
+    var layout = document.querySelector(".diff-layout");
+    if (!layout) return;
+    var prefs = sidebarPrefs();
+    if (prefs.width) layout.style.setProperty("--sidebar-w", prefs.width + "px");
+    layout.classList.toggle("sidebar-collapsed", !!prefs.collapsed);
+  }
+  function setSidebar(prefs) {
+    localStorage.setItem(SIDEBAR_KEY, JSON.stringify(prefs));
+    applySidebar();
+  }
+  function toggleSidebar() {
+    var prefs = sidebarPrefs();
+    prefs.collapsed = !prefs.collapsed;
+    setSidebar(prefs);
+  }
+  document.body.addEventListener("pointerdown", function (e) {
+    var handle = e.target.closest(".sidebar-handle");
+    if (!handle) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    var layout = handle.closest(".diff-layout");
+    var startX = e.clientX;
+    var startW = layout.querySelector(".sidebar").getBoundingClientRect().width;
+    var prefs = sidebarPrefs();
+    function onMove(ev) {
+      var w = startW + (ev.clientX - startX);
+      if (w < 120) {
+        layout.classList.add("sidebar-collapsed");
+        prefs.collapsed = true;
+      } else {
+        layout.classList.remove("sidebar-collapsed");
+        prefs.collapsed = false;
+        prefs.width = Math.max(180, Math.min(480, Math.round(w)));
+        layout.style.setProperty("--sidebar-w", prefs.width + "px");
+      }
+    }
+    function onUp(ev) {
+      handle.releasePointerCapture(ev.pointerId);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      setSidebar(prefs);
+    }
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
   });
 
   // --- After swaps: reapply client state; keep only the newest inline
@@ -215,8 +288,12 @@
     if (ta) ta.focus();
   });
 
-  // --- Live reload: the server broadcasts when the source changes.
-  // Hold the refresh while the reviewer is mid-comment.
+  // --- Live follow: the server broadcasts source and comment changes
+  // separately. Comment churn (another tab, the agent API) refreshes
+  // silently, held while the reviewer is mid-comment. Source churn in
+  // diff mode shows a refresh banner instead of yanking the view —
+  // unless live reload is forced on; doc mode always follows live,
+  // since the reviewed file itself is what changed.
   var refreshPending = false;
   function typing() {
     var el = document.activeElement;
@@ -229,14 +306,36 @@
       return;
     }
     refreshPending = false;
+    hideBanner();
     htmx.ajax("GET", "/content", { target: "#content", swap: "innerHTML" });
   }
   setInterval(function () {
     if (refreshPending) refresh();
   }, 2000);
 
+  var banner = document.getElementById("refresh-banner");
+  function hideBanner() {
+    if (banner) banner.hidden = true;
+  }
+  function liveReload() {
+    return document.body.dataset.mode !== "diff" ||
+      localStorage.getItem("planman-live-reload") === "1";
+  }
+  function onSourceChange() {
+    if (liveReload() || !banner) {
+      refresh();
+      return;
+    }
+    // Dismissing latches only until the next change comes in.
+    banner.hidden = false;
+  }
+  if (banner) {
+    document.getElementById("refresh-banner-go").addEventListener("click", refresh);
+    document.getElementById("refresh-banner-dismiss").addEventListener("click", hideBanner);
+  }
+
   var es = new EventSource("/events");
-  es.addEventListener("source-change", refresh);
+  es.addEventListener("source-change", onSourceChange);
   es.addEventListener("comments-change", refresh);
 
   renderMermaid();

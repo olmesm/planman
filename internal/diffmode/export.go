@@ -58,6 +58,23 @@ func (m *Mode) WriteExport(now time.Time) (string, error) {
 	return jsonPath, nil
 }
 
+// ExportMarkdown renders the current review as markdown without writing
+// anything — the "copy review" button serves it for the clipboard.
+func (m *Mode) ExportMarkdown(now time.Time) (string, error) {
+	comments, err := m.store.List()
+	if err != nil {
+		return "", err
+	}
+	st := m.state()
+	return exportMarkdown(exportPayload{
+		Root:        m.repo.Root,
+		Base:        st.base,
+		Head:        st.head,
+		GeneratedAt: now.UTC().Truncate(time.Second),
+		Comments:    comments,
+	}), nil
+}
+
 // exportMarkdown renders the review as markdown grouped by file.
 func exportMarkdown(p exportPayload) string {
 	var sb strings.Builder

@@ -161,6 +161,10 @@ type RangeOptions struct {
 	// MergeBase diffs from merge-base(Base, Head) instead of Base
 	// itself — three-dot semantics, the usual choice for branch review.
 	MergeBase bool
+	// IgnoreWhitespace passes -w: whitespace-only changes drop out of
+	// the patch. File fingerprints change with it, so client-side viewed
+	// state resets for affected files.
+	IgnoreWhitespace bool
 }
 
 // LineKind classifies a diff row.
@@ -309,6 +313,9 @@ func (r *Repo) DiffRange(o RangeOptions) (*Diff, error) {
 
 	diffArgs := []string{"diff", "--no-color", "--no-ext-diff", "--find-renames",
 		"--src-prefix=a/", "--dst-prefix=b/", "-U3"}
+	if o.IgnoreWhitespace {
+		diffArgs = append(diffArgs, "-w")
+	}
 
 	var patch string
 	var err error

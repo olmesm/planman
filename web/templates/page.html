@@ -36,6 +36,11 @@
       {{end}}
     </div>
   </header>
+  <div class="refresh-banner" id="refresh-banner" hidden>
+    <span>Local changes detected — the review may be out of date.</span>
+    <button class="btn btn-small btn-primary" id="refresh-banner-go">Refresh</button>
+    <button class="icon-btn" id="refresh-banner-dismiss" title="Dismiss until the next change">×</button>
+  </div>
   <main id="main">
     <div id="content">{{.Content}}</div>
   </main>

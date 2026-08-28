@@ -190,7 +190,19 @@ body[data-mode="diff"] #content { max-width: 1440px; margin: 0 auto; }
   border-radius: 999px;
   padding: 0 0.5em;
 }
-.comment-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-text { overflow-wrap: anywhere; }
+.comment-text > *:first-child { margin-top: 0; }
+.comment-text > *:last-child { margin-bottom: 0; }
+.comment-text p, .comment-text ul, .comment-text ol,
+.comment-text pre, .comment-text blockquote { margin: 0.35rem 0; }
+.comment-text pre { padding: 0.4rem 0.6rem; border-radius: 6px; overflow-x: auto; }
+.comment-text .highlight pre { margin: 0; }
+.comment-text code { font-size: 0.85em; }
+.comment-text blockquote {
+  padding-left: 0.6rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
 .reply {
   margin-top: 0.5rem;
   padding: 0.4rem 0 0 0.75rem;
@@ -304,14 +316,16 @@ body[data-mode="diff"] #content { max-width: 1440px; margin: 0 auto; }
 .stat-del { color: var(--danger); font-weight: 600; }
 .empty-diff { text-align: center; color: var(--muted); padding: 3rem 0; }
 
-/* Layout: sidebar (file tree + comment stack) beside the file cards */
-.diff-layout { display: flex; gap: 1.25rem; align-items: flex-start; }
+/* Layout: sidebar (file tree + comment stack) beside the file cards.
+   Width is a variable so the drag handle can resize it; dragging closed
+   (or the Mod+B toggle) collapses it entirely. */
+.diff-layout { --sidebar-w: 250px; display: flex; gap: 0.5rem; align-items: flex-start; }
 .diff-files { flex: 1; min-width: 0; }
 
 .sidebar {
   position: sticky;
   top: 3.8rem;
-  width: 250px;
+  width: var(--sidebar-w);
   flex-shrink: 0;
   max-height: calc(100vh - 5rem);
   overflow-y: auto;
@@ -320,6 +334,20 @@ body[data-mode="diff"] #content { max-width: 1440px; margin: 0 auto; }
   flex-direction: column;
   gap: 1rem;
 }
+.sidebar-handle {
+  position: sticky;
+  top: 3.8rem;
+  flex-shrink: 0;
+  width: 6px;
+  align-self: stretch;
+  max-height: calc(100vh - 5rem);
+  min-height: 8rem;
+  cursor: col-resize;
+  border-radius: 3px;
+  touch-action: none;
+}
+.sidebar-handle:hover, .sidebar-handle:active { background: var(--accent); opacity: 0.4; }
+.diff-layout.sidebar-collapsed .sidebar { display: none; }
 .sidebar-label {
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -368,9 +396,29 @@ body[data-mode="diff"] #content { max-width: 1440px; margin: 0 auto; }
 .tree-file.unchanged { color: var(--muted); }
 .tree-check { color: var(--success); visibility: hidden; font-weight: 700; }
 .tree-file.viewed { color: var(--muted); }
+.tree-file.viewed .tree-name { opacity: 0.55; }
 .tree-file.viewed .tree-check { visibility: visible; }
 @media (max-width: 1000px) {
-  .sidebar { display: none; }
+  .sidebar, .sidebar-handle { display: none; }
+}
+
+/* Refresh banner: shown when the repo changed under a diff review */
+.refresh-banner[hidden] { display: none; }
+.refresh-banner {
+  position: sticky;
+  top: 3.2rem;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin: 0.5rem auto 0;
+  padding: 0.4rem 1rem;
+  max-width: 40rem;
+  background: var(--hunk-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.85rem;
 }
 
 /* Comment stack */

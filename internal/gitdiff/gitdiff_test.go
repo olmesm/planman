@@ -283,3 +283,44 @@ func TestStateFingerprintChanges(t *testing.T) {
 		t.Fatal("fingerprint should change when the worktree changes")
 	}
 }
+
+func TestIgnoreWhitespace(t *testing.T) {
+	repo := fixture(t)
+	// Whitespace-only edit to keep.txt: same content, extra trailing spaces.
+	if err := os.WriteFile(filepath.Join(repo.Root, "keep.txt"), []byte("unchanged   \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := repo.DiffRange(RangeOptions{Base: "HEAD", Head: Worktree})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileByPath(t, plain, "keep.txt") // visible without -w
+
+	ws, err := repo.DiffRange(RangeOptions{Base: "HEAD", Head: Worktree, IgnoreWhitespace: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range ws.Files {
+		if f.Path() == "keep.txt" {
+			t.Fatalf("whitespace-only change should drop out with -w: %+v", f)
+		}
+	}
+}
+
+func TestHunkOrdinals(t *testing.T) {
+	repo := fixture(t)
+	d, err := repo.DiffRange(RangeOptions{Base: "HEAD", Head: Worktree})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range d.Files {
+		for i, h := range f.Hunks {
+			if h.Ordinal != i+1 {
+				t.Fatalf("%s hunk %d has ordinal %d", f.Path(), i, h.Ordinal)
+			}
+		}
+	}
+	if got := HunkID("a/b.go", 2); got != "a/b.go:h2" {
+		t.Fatalf("HunkID: %s", got)
+	}
+}
