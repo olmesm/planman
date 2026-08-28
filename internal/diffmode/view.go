@@ -21,10 +21,11 @@ type contentData struct {
 	BaseLabel    string
 	HeadLabel    string
 	EffBase      string // effective (merge-)base, abbreviated
-	MergeBase    bool
-	View         string // "unified" | "split"
-	AllFiles     bool
-	IgnoreWS     bool
+	MergeBase      bool
+	View           string // "unified" | "split"
+	AllFiles       bool
+	IgnoreWS       bool
+	HasWalkthrough bool
 	Files        []*fileVM
 	Tree         []*treeNode
 	History      []*histRow

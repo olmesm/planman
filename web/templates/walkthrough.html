@@ -1,0 +1,101 @@
+{{define "walkthrough"}}
+<div class="walkthrough">
+  <aside class="walk-rail">
+    <div class="walk-title">{{.Title}}</div>
+    {{if .Focus}}<div class="walk-focus">{{.Focus}}</div>{{end}}
+    <nav class="walk-stops">
+      {{range .Rail}}
+      {{if .ChapterTitle}}
+      <div class="walk-chapter">{{if .ChapterIcon}}<span class="walk-icon">{{.ChapterIcon}}</span>{{end}}{{.ChapterTitle}}</div>
+      {{end}}
+      <button class="walk-stop{{if .Current}} current{{end}}"
+              hx-get="/walkthrough?stop={{.Idx}}" hx-target="#content" hx-swap="innerHTML">
+        <span class="imp-dot imp-{{if .Importance}}{{.Importance}}{{else}}normal{{end}}"></span>
+        <span class="walk-stop-title">{{.Title}}</span>
+      </button>
+      {{end}}
+    </nav>
+    <button class="btn btn-small walk-exit" hx-get="/content" hx-target="#content" hx-swap="innerHTML">
+      ← Back to files
+    </button>
+  </aside>
+
+  <div class="walk-main">
+    {{if .Outdated}}
+    <div class="walk-outdated">
+      This walkthrough was written against an earlier version of the diff —
+      some stops may be stale.
+      <button class="btn btn-small" hx-get="/content" hx-target="#content" hx-swap="innerHTML">Show current diff</button>
+    </div>
+    {{end}}
+
+    <div class="walk-stop-head">
+      <span class="imp-dot imp-{{if .StopImp}}{{.StopImp}}{{else}}normal{{end}}"></span>
+      <h2>{{.StopTitle}}</h2>
+      <span class="walk-progress">stop {{.StopIdx | inc}} of {{.StopCount}}</span>
+    </div>
+    {{if .ProseHTML}}<div class="walk-prose markdown-body">{{.ProseHTML}}</div>{{end}}
+
+    {{range .Cards}}
+    <section class="file walk-card" {{if not .Missing}}data-path="{{.Path}}"{{end}}>
+      <header class="file-header">
+        <span class="file-path">{{.Path}}</span>
+        {{if .Header}}<span class="walk-hunk-header">{{.Header}}</span>{{end}}
+      </header>
+      {{if .Note}}<div class="walk-note">{{.Note}}</div>{{end}}
+      <div class="file-body">
+        {{if .Missing}}
+        <div class="binary-note">This hunk is no longer in the diff ({{.HunkID}}).</div>
+        {{else if .Image}}
+        <div class="image-diff">
+          {{if .Image.OldURL}}<figure><figcaption>Before</figcaption><img src="{{.Image.OldURL}}" alt="{{.Path}} (base)"></figure>{{end}}
+          {{if .Image.NewURL}}<figure><figcaption>After</figcaption><img src="{{.Image.NewURL}}" alt="{{.Path}} (head)"></figure>{{end}}
+        </div>
+        {{else if .Binary}}
+        <div class="binary-note">Binary change</div>
+        {{else}}
+        <table class="diff-table unified">
+          <colgroup><col class="col-num"><col class="col-num"><col class="col-code"></colgroup>
+          <tbody>{{template "diff-unified-rows" .Rows}}</tbody>
+        </table>
+        {{end}}
+      </div>
+    </section>
+    {{end}}
+
+    {{if .Last}}
+    {{if .Support}}
+    <section class="walk-support">
+      <h3>Supporting changes</h3>
+      {{range .Support}}
+      <div class="walk-support-group">
+        <span class="walk-support-reason">{{.Reason}}</span>
+        {{range .IDs}}<code>{{.}}</code> {{end}}
+      </div>
+      {{end}}
+    </section>
+    {{end}}
+    {{if .Commit}}
+    <section class="walk-commit">
+      <h3>Suggested commit message</h3>
+      <pre id="walk-commit-text">{{.Commit.Subject}}{{if .Commit.Body}}
+
+{{.Commit.Body}}{{end}}</pre>
+      <button class="btn btn-small" id="walk-commit-copy">Copy message</button>
+    </section>
+    {{end}}
+    {{end}}
+
+    <div class="walk-nav">
+      {{if ge .PrevIdx 0}}
+      <button class="btn" id="walk-prev" hx-get="/walkthrough?stop={{.PrevIdx}}" hx-target="#content" hx-swap="innerHTML">← Previous</button>
+      {{else}}<span></span>{{end}}
+      {{if ge .NextIdx 0}}
+      <button class="btn btn-primary" id="walk-next" hx-get="/walkthrough?stop={{.NextIdx}}" hx-target="#content" hx-swap="innerHTML">Next →</button>
+      {{else}}
+      <button class="btn btn-primary" hx-get="/content" hx-target="#content" hx-swap="innerHTML">Done — back to files</button>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}

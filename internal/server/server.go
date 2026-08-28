@@ -66,6 +66,7 @@ func New(mode Mode, stay bool) (*Server, error) {
 	funcs := template.FuncMap{
 		"raw":    func(s string) template.HTML { return template.HTML(s) },
 		"mdText": render.Inline,
+		"inc":    func(i int) int { return i + 1 },
 		"fmtTime": func(t time.Time) string {
 			if t.IsZero() {
 				return ""

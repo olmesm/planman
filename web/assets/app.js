@@ -72,7 +72,8 @@
   function applyFileState() {
     var state = viewedState();
     document.querySelectorAll(".file").forEach(function (file) {
-      if (file.dataset.fullFile) return;
+      // Skip cards without a fingerprint (full files, walkthrough hunks).
+      if (file.dataset.fullFile || !file.dataset.fp) return;
       var path = file.dataset.path;
       var isViewed = state[path] === file.dataset.fp;
       file.classList.toggle("viewed", isViewed);
@@ -654,6 +655,21 @@
     }
     var panel = document.getElementById("history-panel");
     if (panel && !panel.hidden) return; // panel owns j/k/space/b while open
+    // Walkthrough view: arrows step through the tour.
+    if (document.querySelector(".walkthrough")) {
+      if (e.key === "ArrowRight") {
+        var next = document.getElementById("walk-next");
+        if (next) next.click();
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        var prev = document.getElementById("walk-prev");
+        if (prev) prev.click();
+        e.preventDefault();
+        return;
+      }
+    }
     switch (e.key) {
       case "j": hunkNav(1); e.preventDefault(); break;
       case "k": hunkNav(-1); e.preventDefault(); break;
@@ -745,6 +761,15 @@
       }
       return;
     }
+    var commitCopy = e.target.closest("#walk-commit-copy");
+    if (commitCopy) {
+      var pre = document.getElementById("walk-commit-text");
+      navigator.clipboard.writeText(pre ? pre.textContent : "").then(function () {
+        commitCopy.textContent = "Copied ✓";
+        setTimeout(function () { commitCopy.textContent = "Copy message"; }, 1500);
+      });
+      return;
+    }
     var copyReview = e.target.closest("#copy-review-btn");
     if (copyReview) {
       fetch("/export.md").then(function (r) { return r.text(); }).then(function (text) {
@@ -813,12 +838,26 @@
     handle.addEventListener("pointerup", onUp);
   });
 
+  // --- The current content view: /content (files) or /walkthrough?…
+  // Live refreshes re-fetch this URL, so an SSE update never yanks the
+  // reviewer out of the walkthrough; a comment POST (whose response is
+  // always the files view) re-fetches it to restore the surface.
+  var contentURL = "/content";
+
   // --- After swaps: reapply client state; keep only the newest inline
   // comment form when one is opened next to a diff row.
   document.body.addEventListener("htmx:afterSwap", function (e) {
     renderMermaid();
     applyFileState();
     scrollPending();
+    if (e.detail && e.detail.target && e.detail.target.id === "content" && e.detail.pathInfo) {
+      var rp = e.detail.pathInfo.finalRequestPath || e.detail.pathInfo.requestPath || "";
+      if (rp.indexOf("/walkthrough") === 0 || rp.indexOf("/content") === 0) {
+        contentURL = rp;
+      } else if (contentURL.indexOf("/walkthrough") === 0) {
+        htmx.ajax("GET", contentURL, { target: "#content", swap: "innerHTML" });
+      }
+    }
     if (e.detail && e.detail.target && e.detail.target.closest) {
       var swapped = document.querySelectorAll("tr.form-row");
       for (var i = 0; i < swapped.length - 1; i++) swapped[i].remove();
@@ -846,7 +885,7 @@
     }
     refreshPending = false;
     hideBanner();
-    htmx.ajax("GET", "/content", { target: "#content", swap: "innerHTML" });
+    htmx.ajax("GET", contentURL, { target: "#content", swap: "innerHTML" });
   }
   setInterval(function () {
     if (refreshPending) refresh();

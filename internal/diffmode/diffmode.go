@@ -20,6 +20,7 @@ import (
 	"github.com/olmesm/planman/internal/review"
 	"github.com/olmesm/planman/internal/server"
 	"github.com/olmesm/planman/internal/sidecar"
+	"github.com/olmesm/planman/internal/walkthrough"
 )
 
 // rangeState is the current comparison plus view options.
@@ -34,8 +35,9 @@ type rangeState struct {
 
 // Mode reviews a repository's diff.
 type Mode struct {
-	repo  *gitdiff.Repo
-	store *sidecar.Store
+	repo     *gitdiff.Repo
+	store    *sidecar.Store
+	walkPath string // walkthrough sidecar file
 
 	mu sync.Mutex
 	st rangeState
@@ -49,7 +51,11 @@ func New(path, base, scope string) (*Mode, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Mode{repo: repo, store: sidecar.NewStore(repo.GitDir)}
+	m := &Mode{
+		repo:     repo,
+		store:    sidecar.NewStore(repo.GitDir),
+		walkPath: walkthrough.Path(repo.GitDir),
+	}
 	st, err := m.preset(scope)
 	if err != nil {
 		return nil, err
@@ -189,6 +195,7 @@ func (m *Mode) Content() (string, any, error) {
 	data.Tree = m.buildNavTree(data.Files, st)
 	data.History = m.buildHistory(st, d)
 	data.Stack = buildStack(comments)
+	data.HasWalkthrough = m.hasWalkthrough()
 	return "diff", data, nil
 }
 
@@ -470,6 +477,17 @@ func (m *Mode) RegisterRoutes(mux *http.ServeMux, s *server.Server) {
 	mux.HandleFunc("GET /search", m.handleSearch)
 	mux.HandleFunc("GET /mdpreview", m.handleMarkdownPreview)
 	mux.HandleFunc("GET /blob", m.handleBlob)
+	mux.HandleFunc("GET /walkthrough", func(w http.ResponseWriter, r *http.Request) {
+		m.handleWalkthroughView(w, r, s)
+	})
+	mux.HandleFunc("GET /api/hunks", m.handleHunksManifest)
+	mux.HandleFunc("GET /api/walkthrough", m.handleWalkthroughGet)
+	mux.HandleFunc("POST /api/walkthrough", func(w http.ResponseWriter, r *http.Request) {
+		m.handleWalkthroughPost(w, r, s)
+	})
+	mux.HandleFunc("DELETE /api/walkthrough", func(w http.ResponseWriter, r *http.Request) {
+		m.handleWalkthroughDelete(w, r, s)
+	})
 	mux.HandleFunc("GET /export.md", func(w http.ResponseWriter, r *http.Request) {
 		md, err := m.ExportMarkdown(time.Now())
 		if err != nil {
@@ -594,8 +612,9 @@ func (m *Mode) handleFullFile(w http.ResponseWriter, r *http.Request, s *server.
 func (m *Mode) Healthz() map[string]any {
 	st := m.state()
 	return map[string]any{
-		"root": m.repo.Root,
-		"base": st.base,
-		"head": st.head,
+		"root":        m.repo.Root,
+		"base":        st.base,
+		"head":        st.head,
+		"walkthrough": m.hasWalkthrough(),
 	}
 }
