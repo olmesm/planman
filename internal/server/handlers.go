@@ -105,7 +105,7 @@ func (s *Server) handleAddComment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), httpStatusFor(err))
 		return
 	}
-	s.Broadcast()
+	s.BroadcastComments()
 	s.writeContent(w)
 }
 
@@ -120,7 +120,7 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), httpStatusFor(err))
 		return
 	}
-	s.Broadcast()
+	s.BroadcastComments()
 	s.writeContent(w)
 }
 
@@ -130,7 +130,7 @@ func (s *Server) handleStatus(status review.Status) http.HandlerFunc {
 			http.Error(w, err.Error(), httpStatusFor(err))
 			return
 		}
-		s.Broadcast()
+		s.BroadcastComments()
 		s.writeContent(w)
 	}
 }
@@ -140,7 +140,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), httpStatusFor(err))
 		return
 	}
-	s.Broadcast()
+	s.BroadcastComments()
 	s.writeContent(w)
 }
 
@@ -215,7 +215,7 @@ func (s *Server) handleAPIPatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), httpStatusFor(err))
 		return
 	}
-	s.Broadcast()
+	s.BroadcastComments()
 	writeJSON(w, http.StatusOK, c)
 }
 
@@ -240,6 +240,6 @@ func (s *Server) handleAPIReply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), httpStatusFor(err))
 		return
 	}
-	s.Broadcast()
+	s.BroadcastComments()
 	writeJSON(w, http.StatusOK, c)
 }

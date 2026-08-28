@@ -370,6 +370,7 @@ type uRow struct {
 	NewNo    int
 	HTML     template.HTML
 	Header   string
+	HunkID   string // hunk rows: stable id within the current diff
 	Exp      *expander
 	File     string
 	Side     string
@@ -391,6 +392,7 @@ type sCell struct {
 type sRow struct {
 	Kind    string // "line" | "hunk" | "expander"
 	Header  string
+	HunkID  string // hunk rows: stable id within the current diff
 	Exp     *expander
 	L       sCell
 	R       sCell
@@ -537,7 +539,7 @@ func buildUnifiedRows(f *gitdiff.File, lexer chroma.Lexer, expandable bool, thre
 	}
 	for hi, h := range f.Hunks {
 		addExpander(gapBefore(f, hi, path))
-		rows = append(rows, &uRow{Kind: "hunk", Header: hunkHeader(h)})
+		rows = append(rows, &uRow{Kind: "hunk", Header: hunkHeader(h), HunkID: h.ID(path)})
 		emph := wordDiffHunk(h)
 		for ri, r := range h.Rows {
 			side, line := anchorFor(r)
@@ -606,7 +608,7 @@ func buildSplitRows(f *gitdiff.File, lexer chroma.Lexer, expandable bool, thread
 
 	for hi, h := range f.Hunks {
 		addExpander(gapBefore(f, hi, path))
-		rows = append(rows, &sRow{Kind: "hunk", Header: hunkHeader(h)})
+		rows = append(rows, &sRow{Kind: "hunk", Header: hunkHeader(h), HunkID: h.ID(path)})
 		emph := wordDiffHunk(h)
 		i := 0
 		for i < len(h.Rows) {

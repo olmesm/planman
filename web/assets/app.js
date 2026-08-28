@@ -236,7 +236,8 @@
   }, 2000);
 
   var es = new EventSource("/events");
-  es.addEventListener("change", refresh);
+  es.addEventListener("source-change", refresh);
+  es.addEventListener("comments-change", refresh);
 
   renderMermaid();
   applyFileState();

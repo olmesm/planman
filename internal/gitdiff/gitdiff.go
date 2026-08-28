@@ -187,7 +187,20 @@ type Hunk struct {
 	NewStart, NewCount int
 	Section            string
 	Rows               []Row
+	// Ordinal is the hunk's 1-based position within its file, giving it
+	// a stable id (path:hN) for the current diff — used by walkthroughs
+	// and keyboard navigation. Ids are only meaningful against the diff
+	// they were computed from; any change to the range renumbers them.
+	Ordinal int
 }
+
+// HunkID names a hunk within the current diff: "path:hN".
+func HunkID(path string, ordinal int) string {
+	return fmt.Sprintf("%s:h%d", path, ordinal)
+}
+
+// ID is the hunk's id within the given file path.
+func (h *Hunk) ID(path string) string { return HunkID(path, h.Ordinal) }
 
 // FileStatus classifies a changed file.
 type FileStatus string
@@ -365,13 +378,14 @@ func parsePatch(patch string) ([]*File, error) {
 
 		hasher := sha256.New()
 		hasher.Write([]byte(f.OldPath + "\x00" + f.NewPath))
-		for _, h := range fd.Hunks {
+		for hi, h := range fd.Hunks {
 			hunk := &Hunk{
 				OldStart: int(h.OrigStartLine),
 				OldCount: int(h.OrigLines),
 				NewStart: int(h.NewStartLine),
 				NewCount: int(h.NewLines),
 				Section:  h.Section,
+				Ordinal:  hi + 1,
 			}
 			hasher.Write(h.Body)
 			oldN, newN := hunk.OldStart, hunk.NewStart
@@ -460,7 +474,7 @@ func (r *Repo) untrackedFiles() ([]*File, error) {
 			continue
 		}
 		lines := splitLines(string(b))
-		hunk := &Hunk{OldStart: 0, OldCount: 0, NewStart: 1, NewCount: len(lines)}
+		hunk := &Hunk{OldStart: 0, OldCount: 0, NewStart: 1, NewCount: len(lines), Ordinal: 1}
 		for i, line := range lines {
 			hunk.Rows = append(hunk.Rows, Row{Kind: Add, NewLine: i + 1, Text: line})
 		}

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"html"
+	"html/template"
 	"strings"
 
 	"github.com/olmesm/planman/internal/critic"
@@ -43,6 +44,25 @@ var md = goldmark.New(
 		renderer.WithNodeRenderers(util.Prioritized(&codeRenderer{}, 100)),
 	),
 )
+
+// mdInline renders untrusted markdown (comment bodies, repo files): same
+// GFM + highlighting as the document renderer, but raw HTML is escaped.
+var mdInline = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithRendererOptions(
+		renderer.WithNodeRenderers(util.Prioritized(&codeRenderer{}, 100)),
+	),
+)
+
+// Inline renders untrusted markdown text to HTML with raw HTML escaped.
+// Used for comment bodies and in-diff markdown previews.
+func Inline(text string) template.HTML {
+	var buf bytes.Buffer
+	if err := mdInline.Convert([]byte(text), &buf); err != nil {
+		return template.HTML("<p>" + html.EscapeString(text) + "</p>")
+	}
+	return template.HTML(buf.String())
+}
 
 // Render parses the document body and renders each top-level block,
 // assigning comments to the block containing (or nearest above) their anchor.

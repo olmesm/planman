@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/olmesm/planman/internal/highlight"
+	"github.com/olmesm/planman/internal/render"
 	"github.com/olmesm/planman/internal/review"
 	"github.com/olmesm/planman/web"
 )
@@ -63,7 +64,8 @@ type Server struct {
 // New creates a server around the given mode.
 func New(mode Mode, stay bool) (*Server, error) {
 	funcs := template.FuncMap{
-		"raw": func(s string) template.HTML { return template.HTML(s) },
+		"raw":    func(s string) template.HTML { return template.HTML(s) },
+		"mdText": render.Inline,
 		"fmtTime": func(t time.Time) string {
 			if t.IsZero() {
 				return ""
@@ -82,7 +84,7 @@ func New(mode Mode, stay bool) (*Server, error) {
 		tmpl:     tmpl,
 		hub:      newHub(),
 	}
-	if err := mode.Watch(s.hub.broadcast); err != nil {
+	if err := mode.Watch(s.BroadcastSource); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -91,8 +93,13 @@ func New(mode Mode, stay bool) (*Server, error) {
 // Mode returns the server's mode.
 func (s *Server) Mode() Mode { return s.mode }
 
-// Broadcast tells connected pages to re-fetch content.
-func (s *Server) Broadcast() { s.hub.broadcast() }
+// BroadcastComments tells connected pages the comment threads changed
+// (another tab or the agent API); the client refreshes silently.
+func (s *Server) BroadcastComments() { s.hub.broadcast(eventComments) }
+
+// BroadcastSource tells connected pages the reviewed source changed
+// underneath them; the client offers a refresh rather than yanking the view.
+func (s *Server) BroadcastSource() { s.hub.broadcast(eventSource) }
 
 // CommentCounts returns (total, open) thread counts.
 func (s *Server) CommentCounts() (int, int) {
