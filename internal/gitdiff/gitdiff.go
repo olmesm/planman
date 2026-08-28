@@ -1,8 +1,9 @@
 // Package gitdiff produces the diff model for a repository by driving
-// the git CLI and parsing its output with sourcegraph/go-diff. It knows
-// three scopes, mirroring what a reviewer wants to see before a PR
-// exists: the working tree vs HEAD, the branch vs a base ref, or
-// everything since the merge-base including uncommitted changes.
+// the git CLI and parsing its output with sourcegraph/go-diff. A diff is
+// defined by a range — any base commit compared against any head, where
+// the head may also be the working tree or the index — with optional
+// merge-base resolution, which is what a reviewer almost always wants
+// when comparing branches.
 package gitdiff
 
 import (
@@ -19,30 +20,17 @@ import (
 	"github.com/sourcegraph/go-diff/diff"
 )
 
-// Scope selects which changes a diff covers.
-type Scope string
-
+// Pseudo-head refs: review endpoints that are not commits.
 const (
-	// ScopeWorking is staged + unstaged + untracked changes vs HEAD.
-	ScopeWorking Scope = "working"
-	// ScopeBranch is committed changes vs the merge-base with a base ref.
-	ScopeBranch Scope = "branch"
-	// ScopeAll is ScopeBranch plus everything uncommitted.
-	ScopeAll Scope = "all"
+	// Worktree compares against the working tree (uncommitted state,
+	// untracked files included).
+	Worktree = "@worktree"
+	// Index compares against the staging area.
+	Index = "@index"
 )
 
-// ParseScope validates a scope string, treating empty as working.
-func ParseScope(s string) (Scope, error) {
-	switch Scope(s) {
-	case ScopeWorking, "":
-		return ScopeWorking, nil
-	case ScopeBranch:
-		return ScopeBranch, nil
-	case ScopeAll:
-		return ScopeAll, nil
-	}
-	return "", fmt.Errorf("invalid scope %q (working, branch, or all)", s)
-}
+// IsPseudo reports whether ref names a non-commit endpoint.
+func IsPseudo(ref string) bool { return ref == Worktree || ref == Index }
 
 // Repo is an opened git repository.
 type Repo struct {
@@ -124,10 +112,32 @@ func (r *Repo) HeadSHA() string {
 	return sha
 }
 
-// StateFingerprint summarizes everything a diff depends on — HEAD, the
-// worktree status, and the size/mtime of untracked files (status only
-// names those, so their content edits would otherwise go unseen) — so
-// callers can poll for changes cheaply.
+// ResolveSHA resolves a ref (or pseudo-head) to a commit SHA. Pseudo
+// heads resolve to "" — they have no commit identity.
+func (r *Repo) ResolveSHA(ref string) (string, error) {
+	if IsPseudo(ref) {
+		return "", nil
+	}
+	return r.git("rev-parse", "--verify", "--quiet", ref+"^{commit}")
+}
+
+// MergeBase returns the merge base of two commits.
+func (r *Repo) MergeBase(a, b string) (string, error) {
+	return r.git("merge-base", a, b)
+}
+
+// ShortSHA abbreviates a SHA for display.
+func ShortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
+}
+
+// StateFingerprint summarizes everything a worktree-facing diff depends
+// on — HEAD, the worktree status, and the size/mtime of untracked files
+// (status only names those, so their content edits would otherwise go
+// unseen) — so callers can poll for changes cheaply.
 func (r *Repo) StateFingerprint() string {
 	status, _ := r.git("status", "--porcelain")
 	h := sha256.New()
@@ -144,10 +154,13 @@ func (r *Repo) StateFingerprint() string {
 	return hex.EncodeToString(h.Sum(nil)[:8])
 }
 
-// Options selects what to diff.
-type Options struct {
-	Scope Scope
-	Base  string // ref for branch/all scopes; empty means DefaultBase
+// RangeOptions selects what to diff.
+type RangeOptions struct {
+	Base string // ref or SHA; "" means DefaultBase
+	Head string // ref, SHA, Worktree, or Index; "" means Worktree
+	// MergeBase diffs from merge-base(Base, Head) instead of Base
+	// itself — three-dot semantics, the usual choice for branch review.
+	MergeBase bool
 }
 
 // LineKind classifies a diff row.
@@ -206,11 +219,16 @@ func (f *File) Path() string {
 	return f.NewPath
 }
 
-// Diff is the parsed changeset.
+// Diff is the parsed changeset for a range.
 type Diff struct {
-	Scope Scope
-	Base  string // resolved base ref ("" for working scope)
-	Files []*File
+	Base string // requested base (symbolic)
+	Head string // requested head (symbolic or pseudo)
+	// BaseSHA is the resolved effective base — the merge-base when
+	// MergeBase was set. "" when the repo has no commits yet.
+	BaseSHA string
+	// HeadSHA is the resolved head commit; "" for pseudo heads.
+	HeadSHA string
+	Files   []*File
 }
 
 // TotalAdditions sums additions across files.
@@ -231,45 +249,72 @@ func (d *Diff) TotalDeletions() int {
 	return n
 }
 
-// Diff computes the changeset for the given options.
-func (r *Repo) Diff(opts Options) (*Diff, error) {
-	scope, err := ParseScope(string(opts.Scope))
-	if err != nil {
-		return nil, err
-	}
-	base := opts.Base
+// DiffRange computes the changeset between a base and a head.
+func (r *Repo) DiffRange(o RangeOptions) (*Diff, error) {
+	base := o.Base
 	if base == "" {
 		base = r.DefaultBase()
 	}
+	head := o.Head
+	if head == "" {
+		head = Worktree
+	}
+	if IsPseudo(base) {
+		return nil, fmt.Errorf("base must be a commit, not %s", base)
+	}
 
-	d := &Diff{Scope: scope}
-	head := r.HeadSHA()
+	d := &Diff{Base: base, Head: head}
+
+	// Resolve the head commit the comparison is anchored to.
+	headCommittish := head
+	if IsPseudo(head) {
+		headCommittish = "HEAD"
+	}
+	headSHA, headErr := r.ResolveSHA(headCommittish)
+	if !IsPseudo(head) {
+		if headErr != nil {
+			return nil, fmt.Errorf("cannot resolve head %q: %w", head, headErr)
+		}
+		d.HeadSHA = headSHA
+	}
+
+	// Resolve the effective base: merge-base against the head when asked.
+	effBase, baseErr := r.ResolveSHA(base)
+	if baseErr == nil && o.MergeBase && headSHA != "" {
+		if mb, err := r.MergeBase(effBase, headSHA); err == nil && mb != "" {
+			effBase = mb
+		}
+	}
+	unborn := baseErr != nil && IsPseudo(head) && r.HeadSHA() == ""
+	if baseErr != nil && !unborn {
+		return nil, fmt.Errorf("cannot resolve base %q: %w", base, baseErr)
+	}
+	d.BaseSHA = effBase
+	if unborn {
+		d.BaseSHA = ""
+	}
+
 	diffArgs := []string{"diff", "--no-color", "--no-ext-diff", "--find-renames",
 		"--src-prefix=a/", "--dst-prefix=b/", "-U3"}
 
 	var patch string
-	switch scope {
-	case ScopeWorking:
-		if head != "" {
-			patch, err = r.gitRaw(append(diffArgs, "HEAD")...)
-			if err != nil {
-				return nil, err
-			}
+	var err error
+	switch {
+	case head == Worktree:
+		if !unborn {
+			patch, err = r.gitRaw(append(diffArgs, d.BaseSHA)...)
 		}
-	case ScopeBranch, ScopeAll:
-		mb, mbErr := r.git("merge-base", base, "HEAD")
-		if mbErr != nil {
-			return nil, fmt.Errorf("cannot resolve base %q: %w", base, mbErr)
-		}
-		d.Base = base
-		args := append(diffArgs, mb)
-		if scope == ScopeBranch {
-			args = append(args, "HEAD")
+	case head == Index:
+		args := append(diffArgs, "--cached")
+		if !unborn {
+			args = append(args, d.BaseSHA)
 		}
 		patch, err = r.gitRaw(args...)
-		if err != nil {
-			return nil, err
-		}
+	default:
+		patch, err = r.gitRaw(append(diffArgs, d.BaseSHA, d.HeadSHA)...)
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	if strings.TrimSpace(patch) != "" {
@@ -281,8 +326,8 @@ func (r *Repo) Diff(opts Options) (*Diff, error) {
 	}
 
 	// Untracked files never appear in git diff output; synthesize them
-	// as added files for the scopes that show uncommitted changes.
-	if scope == ScopeWorking || scope == ScopeAll {
+	// as added files when the head is the working tree.
+	if head == Worktree {
 		untracked, err := r.untrackedFiles()
 		if err != nil {
 			return nil, err
@@ -428,24 +473,60 @@ func (r *Repo) untrackedFiles() ([]*File, error) {
 	return files, nil
 }
 
-// FileLines returns a file's content as lines. ref "" reads the
-// worktree; otherwise the file is read from that revision.
+// FileLines returns a file's content as lines at the given endpoint:
+// Worktree reads the file on disk, Index reads the staged copy, and any
+// other ref reads that revision.
 func (r *Repo) FileLines(ref, path string) ([]string, error) {
 	if strings.Contains(path, "..") {
 		return nil, fmt.Errorf("invalid path %q", path)
 	}
-	if ref == "" {
+	switch ref {
+	case Worktree, "":
 		b, err := os.ReadFile(filepath.Join(r.Root, path))
 		if err != nil {
 			return nil, err
 		}
 		return splitLines(string(b)), nil
+	case Index:
+		out, err := r.gitRaw("show", ":"+path)
+		if err != nil {
+			return nil, err
+		}
+		return splitLines(out), nil
+	default:
+		out, err := r.gitRaw("show", ref+":"+path)
+		if err != nil {
+			return nil, err
+		}
+		return splitLines(out), nil
 	}
-	out, err := r.gitRaw("show", ref+":"+path)
+}
+
+// ListFiles enumerates every file present at the given endpoint —
+// tracked (plus untracked, for the worktree) — for browsing beyond the
+// changed set.
+func (r *Repo) ListFiles(ref string) ([]string, error) {
+	var out string
+	var err error
+	switch ref {
+	case Worktree, "":
+		out, err = r.git("ls-files", "--cached", "--others", "--exclude-standard")
+	case Index:
+		out, err = r.git("ls-files", "--cached")
+	default:
+		out, err = r.git("ls-tree", "-r", "--name-only", ref)
+	}
 	if err != nil {
 		return nil, err
 	}
-	return splitLines(out), nil
+	var files []string
+	for _, f := range strings.Split(out, "\n") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 func splitLines(s string) []string {

@@ -39,8 +39,9 @@ Shared flags:
   --no-browser     Don't open the browser automatically
 
 Diff flags:
-  --scope S        working | branch | all (default working)
-  --base REF       Base ref for branch/all scopes (default: origin default branch)
+  --scope S        Initial range preset: working | staged | branch | all
+                   (default working); any two points are selectable in the UI
+  --base REF       Base ref override (default: origin default branch)
   --stay           Serve until interrupted instead of blocking on handback;
                    binds ports 7350-7359 so agents can discover the server
 
@@ -134,8 +135,8 @@ func runOpen(args []string) int {
 func runDiff(args []string) int {
 	fs := flag.NewFlagSet("diff", flag.ExitOnError)
 	shared := addSharedFlags(fs)
-	scope := fs.String("scope", "working", "diff scope: working, branch, or all")
-	base := fs.String("base", "", "base ref for branch/all scopes")
+	scope := fs.String("scope", "working", "initial range preset: working, staged, branch, or all")
+	base := fs.String("base", "", "base ref override")
 	stay := fs.Bool("stay", false, "serve until interrupted instead of blocking on handback")
 	path, ok := parseWithTrailingFlags(fs, args)
 	if !ok {

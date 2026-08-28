@@ -24,7 +24,7 @@ No database, no cloud, no auth, no CDN.
 └──────────┘   {"event":"handback", ...}
 ```
 
-![A git diff reviewed GitHub-style: file tree, word-level highlights, and an inline comment thread](docs/diff.png)
+![A git diff reviewed GitHub-style: the history navigator comparing the working tree against a tagged release, file tree, and comment stack](docs/diff.png)
 
 ![The same review in split view with the dark theme](docs/split.png)
 
@@ -52,8 +52,8 @@ Shared flags:
   --no-browser     Don't open the browser automatically
 
 Diff flags:
-  --scope S        working | branch | all (default working)
-  --base REF       Base ref for branch/all scopes (default: origin default branch)
+  --scope S        Initial range preset: working | staged | branch | all
+  --base REF       Base ref override (default: origin default branch)
   --stay           Serve until interrupted instead of blocking on handback
 ```
 
@@ -74,23 +74,43 @@ On start they print `{"event":"ready","url":"http://127.0.0.1:PORT"}`
 file-tree sidebar (status dots, viewed checkmarks, click to jump),
 per-file cards with add/delete stats, syntax-highlighted rows,
 word-level change emphasis, expandable hunk context, collapse and
-**Viewed** checkboxes, and a unified/split toggle. Three scopes cover
-the pre-PR lifecycle:
+**Viewed** checkboxes, and a unified/split toggle.
 
-- **working** — staged + unstaged + untracked vs `HEAD` (default)
-- **branch** — commits vs the merge-base with `--base`
-- **all** — everything since the merge-base, including uncommitted work
+**Any two points compare.** The range chip in the toolbar opens a
+history navigator — a commit graph with lanes, branch/tag pills, and
+two pinned pseudo-endpoints for the **working tree** and the **index**.
+Click a row to set the compare endpoint, shift-click (or `b`) to set
+the base; `j`/`k` move, `space` compares. The **merge-base** toggle
+diffs from the merge-base of the two endpoints (three-dot semantics,
+marked in the graph) rather than the base itself. Preset chips cover
+the common cases:
+
+- **Working tree** — staged + unstaged + untracked vs `HEAD` (default)
+- **Branch** — commits vs the merge-base with the default branch
+- **All** — everything since the merge-base, uncommitted work included
+
+**All files.** The `all files` toggle lists every file at the head
+endpoint in the sidebar, not just changed ones — click an unchanged
+file to open it in full as a reviewable card, comments included.
 
 Hover a line, hit **+**, and comment on it (either side of the diff).
-Threads support replies, resolve/reopen, and delete. The page follows
-the repository live: edit, stage, or commit and the diff refreshes over
-SSE — comment threads re-anchor to their line's content when the diff
-shifts underneath them.
+Threads support replies, resolve/reopen, and delete. Every thread
+records the comparison it was made against — the selected refs plus
+the SHAs they resolved to — and the **comment stack** in the sidebar
+lists all threads with those references: clicking one navigates the
+view back to that comparison and scrolls to the thread, so you can
+show the agent exactly what an earlier state got right. (A thread made
+against the working tree re-anchors into the current state instead —
+uncommitted endpoints have no commit to return to.)
+
+The page follows the repository live: edit, stage, or commit and the
+diff refreshes over SSE — threads re-anchor to their line's content
+when the diff shifts underneath them.
 
 Diff comments persist in `.git/planman/review.json` — per-repo,
 invisible to your worktree, never committed. On handback, planman also
-writes `handback.json` and `handback.md` exports next to it and prints
-the path in the handback event.
+writes `handback.json` and `handback.md` exports next to it (range
+references included) and prints the path in the handback event.
 
 ## Agent workflow
 

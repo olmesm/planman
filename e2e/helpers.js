@@ -152,6 +152,7 @@ function makeRepo() {
     "main.go",
     'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("hello")\n}\n'
   );
+  write("keep.txt", "unchanged\n");
   git("add", ".");
   git("commit", "-m", "base");
   git("checkout", "-b", "feature");

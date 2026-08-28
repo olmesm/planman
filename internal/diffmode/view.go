@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/olmesm/planman/internal/gitdiff"
@@ -15,17 +16,245 @@ import (
 
 // contentData is the template payload for the "diff" content fragment.
 type contentData struct {
-	Scope        string
-	Base         string
+	Base         string // selected base ref (symbolic)
+	Head         string // selected head endpoint
+	BaseLabel    string
+	HeadLabel    string
+	EffBase      string // effective (merge-)base, abbreviated
+	MergeBase    bool
 	View         string // "unified" | "split"
+	AllFiles     bool
 	Files        []*fileVM
 	Tree         []*treeNode
+	History      []*histRow
+	Stack        []*stackEntry
 	PageComments []*review.Comment
 	// Detached threads whose file is no longer in the diff at all.
 	Detached  []*review.Comment
 	NumFiles  int
 	TotalAdds int
 	TotalDels int
+}
+
+// pill is a ref decoration shown on a history row.
+type pill struct {
+	Text string
+	Kind string // "branch" | "remote" | "tag"
+}
+
+// histRow is one row of the history navigator.
+type histRow struct {
+	Ref         string // endpoint value: SHA, or a pseudo head
+	Pseudo      bool   // working tree / staged rows
+	SVG         template.HTML
+	Subject     string
+	Pills       []pill
+	Short       string
+	Age         string
+	IsHead      bool
+	IsBase      bool // currently selected base
+	IsCompare   bool // currently selected head
+	IsMergeBase bool // resolved effective base, when it differs from the selection
+}
+
+// stackEntry is one thread in the comment stack.
+type stackEntry struct {
+	ID         string
+	Snippet    string
+	Loc        string
+	Author     string
+	Age        string
+	Resolved   bool
+	RangeLabel string
+	// NavBase/NavHead reproduce the comparison the thread was made
+	// against; empty when the thread carries no range reference.
+	NavBase string
+	NavHead string
+}
+
+// buildHistory renders the log with selection markers and pseudo rows
+// for the working tree and index.
+func (m *Mode) buildHistory(st rangeState, d *gitdiff.Diff) []*histRow {
+	baseSel, _ := m.repo.ResolveSHA(st.base)
+	headSel := ""
+	if !gitdiff.IsPseudo(st.head) {
+		headSel, _ = m.repo.ResolveSHA(st.head)
+	}
+
+	rows := []*histRow{
+		{
+			Ref: gitdiff.Worktree, Pseudo: true, Subject: "Working tree",
+			SVG:       pseudoSVG(),
+			IsCompare: st.head == gitdiff.Worktree,
+		},
+		{
+			Ref: gitdiff.Index, Pseudo: true, Subject: "Staged changes",
+			SVG:       pseudoSVG(),
+			IsCompare: st.head == gitdiff.Index,
+		},
+	}
+	log, err := m.repo.Log(120)
+	if err != nil {
+		return rows
+	}
+	for _, g := range log {
+		row := &histRow{
+			Ref:         g.SHA,
+			SVG:         graphSVG(g),
+			Subject:     g.Subject,
+			Short:       g.Short,
+			Age:         humanAge(g.When),
+			IsHead:      g.IsHead,
+			IsBase:      g.SHA == baseSel,
+			IsCompare:   headSel != "" && g.SHA == headSel,
+			IsMergeBase: d.BaseSHA != "" && g.SHA == d.BaseSHA && d.BaseSHA != baseSel,
+		}
+		for _, ref := range g.Refs {
+			p := pill{Text: ref, Kind: "branch"}
+			if rest, ok := strings.CutPrefix(ref, "tag: "); ok {
+				p = pill{Text: rest, Kind: "tag"}
+			} else if strings.HasPrefix(ref, "origin/") {
+				p.Kind = "remote"
+			}
+			row.Pills = append(row.Pills, p)
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+const (
+	laneW = 12
+	rowH  = 26
+)
+
+var laneColors = 8
+
+func laneX(l int) int { return laneW/2 + l*laneW }
+
+// graphSVG draws one row's lane geometry.
+func graphSVG(g *gitdiff.GraphRow) template.HTML {
+	w := g.NLanes * laneW
+	if w < laneW {
+		w = laneW
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, `<svg class="lanes" width="%d" height="%d" viewBox="0 0 %d %d">`, w, rowH, w, rowH)
+	line := func(x1, y1, x2, y2, lane int) {
+		fmt.Fprintf(&b, `<line x1="%d" y1="%d" x2="%d" y2="%d" class="lane-%d"/>`,
+			x1, y1, x2, y2, lane%laneColors)
+	}
+	for _, p := range g.Pass {
+		line(laneX(p[0]), 0, laneX(p[1]), rowH, p[1])
+	}
+	for _, mg := range g.Merge {
+		line(laneX(mg), 0, laneX(g.Dot), rowH/2, g.Dot)
+	}
+	for _, f := range g.Fork {
+		line(laneX(g.Dot), rowH/2, laneX(f), rowH, f)
+	}
+	// A lane that continues through the dot needs its top half drawn.
+	if len(g.Merge) == 0 && dotHasIncoming(g) {
+		line(laneX(g.Dot), 0, laneX(g.Dot), rowH/2, g.Dot)
+	}
+	fmt.Fprintf(&b, `<circle cx="%d" cy="%d" r="3.5" class="dot lane-%d%s"/>`,
+		laneX(g.Dot), rowH/2, g.Dot%laneColors, headClass(g))
+	b.WriteString(`</svg>`)
+	return template.HTML(b.String())
+}
+
+// dotHasIncoming reports whether anything above connects to this dot —
+// i.e. the commit is not a branch tip opening a fresh lane.
+func dotHasIncoming(g *gitdiff.GraphRow) bool {
+	return !g.IsTip
+}
+
+func headClass(g *gitdiff.GraphRow) string {
+	if g.IsHead {
+		return " head"
+	}
+	return ""
+}
+
+func pseudoSVG() template.HTML {
+	return template.HTML(fmt.Sprintf(
+		`<svg class="lanes" width="%d" height="%d"><circle cx="%d" cy="%d" r="3.5" class="dot pseudo"/></svg>`,
+		laneW, rowH, laneX(0), rowH/2))
+}
+
+// humanAge renders a compact relative timestamp.
+func humanAge(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+	return t.Format("Jan 2006")
+}
+
+// buildStack lists every thread, open before resolved, newest first,
+// each with its range reference for navigation.
+func buildStack(comments []*review.Comment) []*stackEntry {
+	entries := make([]*stackEntry, 0, len(comments))
+	for _, c := range comments {
+		e := &stackEntry{
+			ID:       c.ID,
+			Snippet:  trimText(c.Text, 90),
+			Author:   c.Author,
+			Age:      humanAge(c.Ts),
+			Resolved: c.Resolved(),
+			Loc:      "review",
+		}
+		if !c.Anchor.Page {
+			e.Loc = fmt.Sprintf("%s:%d", c.Anchor.File, c.Anchor.Line)
+		}
+		if c.Anchor.Base != "" {
+			label := headLabel(c.Anchor.Head)
+			if c.Anchor.HeadSHA != "" {
+				label = gitdiff.ShortSHA(c.Anchor.HeadSHA)
+			}
+			e.RangeLabel = headLabel(c.Anchor.Base) + " ⟵ " + label
+			e.NavBase = c.Anchor.BaseSHA
+			if e.NavBase == "" {
+				e.NavBase = c.Anchor.Base
+			}
+			e.NavHead = c.Anchor.Head
+			if !gitdiff.IsPseudo(c.Anchor.Head) && c.Anchor.HeadSHA != "" {
+				e.NavHead = c.Anchor.HeadSHA
+			}
+		}
+		entries = append(entries, e)
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].Resolved != entries[j].Resolved {
+			return !entries[i].Resolved
+		}
+		return i > j // stored order is chronological; newest first
+	})
+	return entries
+}
+
+func trimText(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+// fullFileVM renders an unchanged file in full.
+type fullFileVM struct {
+	Path string
+	Rows []*uRow
 }
 
 // treeNode is one entry in the file-tree sidebar: a directory (possibly

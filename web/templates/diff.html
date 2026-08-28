@@ -28,12 +28,29 @@
     <span class="stat-del">−{{.TotalDels}}</span>
   </span>
   <span class="diff-controls">
-    <select class="scope-select" name="scope" title="Which changes to show"
-            hx-get="/content" hx-target="#content" hx-swap="innerHTML">
-      <option value="working" {{if eq .Scope "working"}}selected{{end}}>Working tree vs HEAD</option>
-      <option value="branch" {{if eq .Scope "branch"}}selected{{end}}>Branch vs {{.Base}}</option>
-      <option value="all" {{if eq .Scope "all"}}selected{{end}}>Everything since {{.Base}}</option>
-    </select>
+    <span class="preset-chips">
+      <button class="btn btn-small preset-btn" data-preset="working"
+              hx-get="/content?preset=working" hx-target="#content" hx-swap="innerHTML"
+              title="Staged + unstaged + untracked vs HEAD">Working tree</button>
+      <button class="btn btn-small preset-btn" data-preset="branch"
+              hx-get="/content?preset=branch" hx-target="#content" hx-swap="innerHTML"
+              title="Commits vs the merge-base with the default branch">Branch</button>
+      <button class="btn btn-small preset-btn" data-preset="all"
+              hx-get="/content?preset=all" hx-target="#content" hx-swap="innerHTML"
+              title="Everything since the merge-base, uncommitted work included">All</button>
+    </span>
+    <button class="btn btn-small range-chip" id="history-toggle"
+            title="Pick any two points to compare — the effective base is {{.EffBase}}">
+      <span class="range-base">{{.BaseLabel}}</span> ⟵ <span class="range-head">{{.HeadLabel}}</span> ▾
+    </button>
+    <button class="btn btn-small toggle-btn{{if .MergeBase}} active{{end}}" id="mb-toggle"
+            title="Diff from the merge-base of the two endpoints (three-dot) instead of the base itself"
+            hx-get="/content?mb={{if .MergeBase}}0{{else}}1{{end}}"
+            hx-target="#content" hx-swap="innerHTML">merge-base</button>
+    <button class="btn btn-small toggle-btn{{if .AllFiles}} active{{end}}" id="allfiles-toggle"
+            title="List every file at the head endpoint in the sidebar, not just changed ones"
+            hx-get="/content?files={{if .AllFiles}}changed{{else}}all{{end}}"
+            hx-target="#content" hx-swap="innerHTML">all files</button>
     <span class="view-toggle">
       <button class="btn btn-small{{if eq .View "unified"}} active{{end}}"
               hx-get="/content?view=unified" hx-target="#content" hx-swap="innerHTML">Unified</button>
@@ -43,15 +60,59 @@
   </span>
 </div>
 
+<div class="history-panel" id="history-panel" hidden>
+  <div class="history-hint">
+    Click a row to set the <b>compare</b> endpoint · shift-click (or <kbd>b</kbd>) sets the <b>base</b>
+    · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>space</kbd> compare
+  </div>
+  <div class="history-rows">
+  {{range .History}}
+    <div class="hist-row{{if .IsCompare}} sel-compare{{end}}{{if .IsBase}} sel-base{{end}}{{if .Pseudo}} pseudo{{end}}"
+         data-ref="{{.Ref}}" data-pseudo="{{if .Pseudo}}1{{end}}" tabindex="0">
+      {{.SVG}}
+      <span class="hist-subject{{if .Pseudo}} pseudo-label{{end}}">{{.Subject}}</span>
+      {{range .Pills}}<span class="ref-pill {{.Kind}}">{{.Text}}</span>{{end}}
+      {{if .IsHead}}<span class="ref-pill headpill">HEAD</span>{{end}}
+      {{if .IsMergeBase}}<span class="sel-badge mbase">merge-base</span>{{end}}
+      {{if .IsBase}}<span class="sel-badge base">BASE</span>{{end}}
+      {{if .IsCompare}}<span class="sel-badge compare">COMPARE</span>{{end}}
+      <span class="hist-sha">{{.Short}}</span>
+      <span class="hist-age">{{.Age}}</span>
+    </div>
+  {{end}}
+  </div>
+</div>
+
 {{if not .Files}}
 <div class="empty-diff">No changes to review.</div>
 {{end}}
 
 <div class="diff-layout">
-{{if .Tree}}
-<nav class="file-tree" aria-label="Changed files">
-  <ul>{{template "tree-nodes" .Tree}}</ul>
-</nav>
+{{if or .Tree .Stack}}
+<div class="sidebar">
+  {{if .Tree}}
+  <nav class="file-tree" aria-label="Files">
+    <div class="sidebar-label">Files</div>
+    <ul>{{template "tree-nodes" .Tree}}</ul>
+  </nav>
+  {{end}}
+  {{if .Stack}}
+  <nav class="comment-stack" aria-label="Comments">
+    <div class="sidebar-label">Comments</div>
+    {{range .Stack}}
+    <div class="stack-entry{{if .Resolved}} resolved{{end}}" data-comment="{{.ID}}"
+         data-nav-base="{{.NavBase}}" data-nav-head="{{.NavHead}}"
+         title="{{.Loc}}{{if .RangeLabel}} · made against {{.RangeLabel}}{{end}}">
+      <span class="stack-dot"></span>
+      <span class="stack-body">
+        <span class="stack-snippet">{{.Snippet}}</span>
+        <span class="stack-meta">{{.Author}} · {{.Loc}}{{if .RangeLabel}} · {{.RangeLabel}}{{end}}</span>
+      </span>
+    </div>
+    {{end}}
+  </nav>
+  {{end}}
+</div>
 {{end}}
 <div class="diff-files">
 {{range .Files}}
@@ -98,6 +159,7 @@
   </div>
 </section>
 {{end}}
+<div id="extra-files"></div>
 </div>
 </div>
 {{end}}
@@ -110,6 +172,10 @@
     <summary class="tree-dir">{{.Name}}</summary>
     <ul>{{template "tree-nodes" .Children}}</ul>
   </details>
+{{else if eq .Status "unchanged"}}
+  <a class="tree-file unchanged" href="#" data-path="{{.Path}}" data-full="1" title="{{.Path}} (unchanged — click to view)">
+    <span class="tree-dot st-unchanged"></span><span class="tree-name">{{.Name}}</span>
+  </a>
 {{else}}
   <a class="tree-file" href="#f-{{.Fingerprint}}" data-path="{{.Path}}" title="{{.Path}}">
     <span class="tree-dot st-{{.Status}}"></span><span class="tree-name">{{.Name}}</span>
@@ -118,6 +184,26 @@
 {{end}}
 </li>
 {{end}}
+{{end}}
+
+{{define "full-file"}}
+<section class="file full-file" id="full-{{.Path}}" data-path="{{.Path}}" data-full-file="1">
+  <header class="file-header">
+    <button class="icon-btn chevron" title="Collapse or expand this file">▾</button>
+    <span class="file-status st-unchanged">file</span>
+    <span class="file-path">{{.Path}}</span>
+    <button class="icon-btn copy-path" title="Copy file path" data-path="{{.Path}}">⧉</button>
+    <span class="file-stats">{{len .Rows}} lines</span>
+    <button class="icon-btn close-file" title="Close this file"
+            onclick="this.closest('section.file').remove()">×</button>
+  </header>
+  <div class="file-body">
+    <table class="diff-table unified">
+      <colgroup><col class="col-num"><col class="col-num"><col class="col-code"></colgroup>
+      <tbody>{{template "diff-unified-rows" .Rows}}</tbody>
+    </table>
+  </div>
+</section>
 {{end}}
 
 {{define "diff-unified-rows"}}

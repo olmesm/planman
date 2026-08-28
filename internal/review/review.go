@@ -54,6 +54,16 @@ type Anchor struct {
 	Side    Side   `json:"side,omitempty"`
 	Line    int    `json:"line,omitempty"`
 	Context string `json:"context,omitempty"`
+
+	// Diff anchors also record the comparison the thread was created
+	// against — the selected refs plus the SHAs they resolved to at the
+	// time — so a review can navigate back to that exact point later.
+	// HeadSHA stays empty for pseudo heads (worktree, index): those
+	// endpoints have no commit identity to return to.
+	Base    string `json:"base,omitempty"`
+	Head    string `json:"head,omitempty"`
+	BaseSHA string `json:"base_sha,omitempty"`
+	HeadSHA string `json:"head_sha,omitempty"`
 }
 
 // Reply is a threaded response to a comment.

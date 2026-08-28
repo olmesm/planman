@@ -16,7 +16,7 @@ Scan ports 7350-7359 on 127.0.0.1 and GET `/healthz` on each. A planman
 server answers with JSON like:
 
 ```json
-{"app":"planman","mode":"diff","root":"/abs/path/to/repo","scope":"working","base":"main"}
+{"app":"planman","mode":"diff","root":"/abs/path/to/repo","base":"main","head":"@worktree"}
 ```
 
 Match `root` against this repository's root (`git rev-parse
@@ -36,10 +36,13 @@ GET $P/api/comments?status=open
 Each comment has an `id`, `author`, `text`, `replies`, and an `anchor`:
 
 - Diff threads: `{"file":"path","side":"old|new","line":N,"context":"<exact line text>"}`.
-  `side:"new"` lines are in the current worktree; `side:"old"` lines are
-  from the base version (usually pointing at something that was removed
-  or changed). Locate the code by `context`, not just the line number —
-  the file may have shifted.
+  `side:"new"` lines are at the review's head endpoint (usually the
+  worktree); `side:"old"` lines are from the base version (usually
+  pointing at something that was removed or changed). Locate the code by
+  `context`, not just the line number — the file may have shifted. The
+  anchor also records `base`/`head` (and resolved `base_sha`/`head_sha`)
+  — the comparison the reviewer was looking at when they wrote it; a
+  head of `@worktree` or `@index` means uncommitted state at the time.
 - Document threads: `{"line":N}` refers to the reviewed markdown file.
 - `{"page":true}` threads are about the whole review.
 

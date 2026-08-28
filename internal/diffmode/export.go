@@ -15,8 +15,8 @@ import (
 // exportPayload is the machine-readable handback artifact.
 type exportPayload struct {
 	Root        string            `json:"root"`
-	Scope       string            `json:"scope"`
-	Base        string            `json:"base,omitempty"`
+	Base        string            `json:"base"`
+	Head        string            `json:"head"`
 	GeneratedAt time.Time         `json:"generated_at"`
 	Comments    []*review.Comment `json:"comments"`
 }
@@ -29,7 +29,7 @@ func (m *Mode) WriteExport(now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	scope, base, _ := m.state()
+	st := m.state()
 	dir := filepath.Dir(m.store.Path())
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -37,8 +37,8 @@ func (m *Mode) WriteExport(now time.Time) (string, error) {
 
 	payload := exportPayload{
 		Root:        m.repo.Root,
-		Scope:       string(scope),
-		Base:        base,
+		Base:        st.base,
+		Head:        st.head,
 		GeneratedAt: now.UTC().Truncate(time.Second),
 		Comments:    comments,
 	}
@@ -63,11 +63,7 @@ func exportMarkdown(p exportPayload) string {
 	var sb strings.Builder
 	open := review.CountOpen(p.Comments)
 	fmt.Fprintf(&sb, "# planman review — %d open comment(s), %d total\n\n", open, len(p.Comments))
-	fmt.Fprintf(&sb, "Scope: %s", p.Scope)
-	if p.Base != "" {
-		fmt.Fprintf(&sb, " (base %s)", p.Base)
-	}
-	sb.WriteString("\n")
+	fmt.Fprintf(&sb, "Comparing %s ⟵ %s\n", p.Base, headLabel(p.Head))
 
 	byFile := map[string][]*review.Comment{}
 	var pageLevel []*review.Comment
@@ -87,6 +83,9 @@ func exportMarkdown(p exportPayload) string {
 		fmt.Fprintf(&sb, "- **[%s]** (%s%s) %s: %s\n", c.ID, loc, c.Status, c.Author, c.Text)
 		if c.Anchor.Context != "" {
 			fmt.Fprintf(&sb, "  > `%s`\n", c.Anchor.Context)
+		}
+		if c.Anchor.Base != "" {
+			fmt.Fprintf(&sb, "  made against %s ⟵ %s\n", c.Anchor.Base, headLabel(c.Anchor.Head))
 		}
 		for _, r := range c.Replies {
 			fmt.Fprintf(&sb, "  - reply %s: %s\n", r.Author, r.Text)

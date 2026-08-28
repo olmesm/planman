@@ -72,6 +72,7 @@
   function applyFileState() {
     var state = viewedState();
     document.querySelectorAll(".file").forEach(function (file) {
+      if (file.dataset.fullFile) return;
       var path = file.dataset.path;
       var isViewed = state[path] === file.dataset.fp;
       file.classList.toggle("viewed", isViewed);
@@ -79,10 +80,98 @@
       if (box) box.checked = isViewed;
       file.classList.toggle("collapsed", !!collapsed[path]);
       var treeEntry = document.querySelector(
-        '.tree-file[data-path="' + CSS.escape(path) + '"]'
+        '.tree-file[data-path="' + CSS.escape(path) + '"]:not(.unchanged)'
       );
       if (treeEntry) treeEntry.classList.toggle("viewed", isViewed);
     });
+    var panel = document.getElementById("history-panel");
+    if (panel) panel.hidden = localStorage.getItem("planman-history-open") !== "1";
+  }
+
+  // --- History navigator: pick compare/base endpoints from the graph.
+  function setEndpoint(params) {
+    htmx.ajax("GET", "/content", {
+      target: "#content",
+      swap: "innerHTML",
+      values: params,
+    });
+  }
+
+  document.body.addEventListener("click", function (e) {
+    if (e.target.closest("#history-toggle")) {
+      var panel = document.getElementById("history-panel");
+      var open = panel.hidden;
+      panel.hidden = !open;
+      localStorage.setItem("planman-history-open", open ? "1" : "0");
+      return;
+    }
+    var row = e.target.closest(".hist-row");
+    if (row) {
+      if (e.shiftKey && !row.dataset.pseudo) setEndpoint({ base: row.dataset.ref });
+      else setEndpoint({ head: row.dataset.ref });
+      return;
+    }
+    var entry = e.target.closest(".stack-entry");
+    if (entry) {
+      pendingScroll = "#comment-" + entry.dataset.comment;
+      if (entry.dataset.navBase && entry.dataset.navHead) {
+        setEndpoint({ base: entry.dataset.navBase, head: entry.dataset.navHead, mb: "0" });
+      } else {
+        scrollPending();
+      }
+      return;
+    }
+    var full = e.target.closest(".tree-file.unchanged");
+    if (full) {
+      e.preventDefault();
+      var path = full.dataset.path;
+      var existing = document.querySelector('section.file[data-full-file][data-path="' + CSS.escape(path) + '"]');
+      if (existing) {
+        existing.scrollIntoView({ block: "start" });
+        return;
+      }
+      pendingScroll = 'section.file[data-full-file][data-path="' + CSS.escape(path) + '"]';
+      htmx.ajax("GET", "/file", {
+        target: "#extra-files",
+        swap: "beforeend",
+        values: { path: path },
+      });
+      return;
+    }
+  });
+
+  // Keyboard navigation inside the history panel.
+  document.body.addEventListener("keydown", function (e) {
+    var panel = document.getElementById("history-panel");
+    if (!panel || panel.hidden) return;
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    var rows = Array.from(panel.querySelectorAll(".hist-row"));
+    var idx = rows.indexOf(panel.querySelector(".hist-row.kb-cursor"));
+    if (e.key === "j" || e.key === "k") {
+      idx = e.key === "j" ? Math.min(idx + 1, rows.length - 1) : Math.max(idx - 1, 0);
+      rows.forEach(function (r) { r.classList.remove("kb-cursor"); });
+      rows[idx].classList.add("kb-cursor");
+      rows[idx].scrollIntoView({ block: "nearest" });
+      e.preventDefault();
+    } else if ((e.key === " " || e.key === "b") && idx >= 0) {
+      var row = rows[idx];
+      if (e.key === "b" && !row.dataset.pseudo) setEndpoint({ base: row.dataset.ref });
+      if (e.key === " ") setEndpoint({ head: row.dataset.ref });
+      e.preventDefault();
+    }
+  });
+
+  // Deferred scrolling after a swap (stack navigation, full-file load).
+  var pendingScroll = null;
+  function scrollPending() {
+    if (!pendingScroll) return;
+    var el = document.querySelector(pendingScroll);
+    pendingScroll = null;
+    if (el) {
+      el.scrollIntoView({ block: "center" });
+      el.classList.add("flash");
+      setTimeout(function () { el.classList.remove("flash"); }, 1500);
+    }
   }
 
   document.body.addEventListener("change", function (e) {
@@ -117,6 +206,7 @@
   document.body.addEventListener("htmx:afterSwap", function (e) {
     renderMermaid();
     applyFileState();
+    scrollPending();
     if (e.detail && e.detail.target && e.detail.target.closest) {
       var swapped = document.querySelectorAll("tr.form-row");
       for (var i = 0; i < swapped.length - 1; i++) swapped[i].remove();

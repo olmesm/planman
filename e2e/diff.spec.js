@@ -169,15 +169,109 @@ test.describe("planman diff review flow", () => {
       .toBe(3);
   });
 
-  test("scope switching: branch shows only committed changes", async ({ page }) => {
+  test("presets: branch shows only committed changes", async ({ page }) => {
     app = await launchDiff();
     await page.goto(app.url);
-    // Commit the working change so branch scope has content.
+    // Commit the working change so the branch preset has content.
     app.repo.git("add", "main.go");
     app.repo.git("commit", "-m", "greeting");
-    await page.selectOption(".scope-select", "branch");
+    await page.click('.preset-btn[data-preset="branch"]');
     await expect(page.locator('.file[data-path="main.go"]')).toBeVisible();
     await expect(page.locator('.file[data-path="notes.txt"]')).toHaveCount(0);
+    await expect(page.locator(".range-chip .range-head")).toHaveText("HEAD");
+  });
+
+  test("history navigator: graph rows, click-to-compare, shift-click base", async ({ page }) => {
+    app = await launchDiff();
+    app.repo.git("add", "main.go");
+    app.repo.git("commit", "-m", "greeting change");
+    await page.goto(app.url);
+
+    await page.click("#history-toggle");
+    const panel = page.locator("#history-panel");
+    await expect(panel).toBeVisible();
+    // Pseudo endpoints + at least the two commits.
+    await expect(panel.locator(".hist-row.pseudo")).toHaveCount(2);
+    const commits = panel.locator(".hist-row:not(.pseudo)");
+    await expect(commits.first().locator(".hist-subject")).toHaveText("greeting change");
+    await expect(commits.first().locator("svg.lanes circle")).toHaveCount(1);
+    // Working tree is the current compare endpoint.
+    await expect(panel.locator(".hist-row.pseudo").first()).toHaveClass(/sel-compare/);
+
+    // Shift-click the older commit → it becomes the base.
+    await commits.nth(1).click({ modifiers: ["Shift"] });
+    await expect(page.locator("#history-panel .hist-row:not(.pseudo)").nth(1)).toHaveClass(/sel-base/);
+
+    // Click the newer commit → compare against it; badge moves off the
+    // working tree and the committed change is the diff.
+    await page.locator("#history-panel .hist-row:not(.pseudo)").first().click();
+    await expect(page.locator("#history-panel .hist-row:not(.pseudo)").first()).toHaveClass(/sel-compare/);
+    await expect(page.locator("#history-panel .hist-row.pseudo").first()).not.toHaveClass(/sel-compare/);
+    await expect(page.locator('.file[data-path="main.go"]')).toBeVisible();
+    await expect(page.locator(".diff-summary")).toContainText("1 changed file");
+  });
+
+  test("comments record their range and the stack navigates back", async ({ page }) => {
+    app = await launchDiff();
+    await page.goto(app.url);
+    await page.fill("#author", "olie");
+
+    // Comment on the working-tree diff.
+    const addRow = page.locator('.file[data-path="main.go"] tr.line.add').first();
+    await addRow.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await addRow.hover();
+    await addRow.locator(".add-comment-btn").click();
+    await page.fill('tr.form-row textarea[name="text"]', "this greeting was good");
+    await page.click('tr.form-row button[type="submit"]');
+    await expect(page.locator(".comment", { hasText: "this greeting was good" })).toBeVisible();
+
+    // The anchor carries the comparison it was made against.
+    const stored = app.readStore().comments[0];
+    expect(stored.anchor.base).toBe("HEAD");
+    expect(stored.anchor.head).toBe("@worktree");
+    expect(stored.anchor.base_sha).toMatch(/^[0-9a-f]{40}$/);
+
+    // The stack lists it with its range.
+    const entry = page.locator(".stack-entry", { hasText: "this greeting was good" });
+    await expect(entry).toBeVisible();
+    await expect(entry.locator(".stack-meta")).toContainText("HEAD ⟵ Working tree");
+
+    // Move the view elsewhere, then navigate back via the stack.
+    app.repo.git("add", "main.go");
+    app.repo.git("commit", "-m", "greeting change");
+    await page.click('.preset-btn[data-preset="branch"]');
+    await expect(page.locator(".range-chip .range-head")).toHaveText("HEAD");
+
+    await page.locator(".stack-entry", { hasText: "this greeting was good" }).click();
+    const comment = page.locator(".comment", { hasText: "this greeting was good" });
+    await expect(comment).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("all files: unchanged files browse and accept comments", async ({ page }) => {
+    app = await launchDiff();
+    await page.goto(app.url);
+    await page.fill("#author", "olie");
+
+    await page.click("#allfiles-toggle");
+    const unchanged = page.locator(".tree-file.unchanged");
+    await expect(unchanged).toHaveCount(1); // keep.txt
+    await unchanged.click();
+
+    const card = page.locator('section.file[data-full-file][data-path="keep.txt"]');
+    await expect(card).toBeVisible();
+    await expect(card.locator("tr.line", { hasText: "unchanged" })).toBeVisible();
+
+    // Comment on a line of the unchanged file.
+    const row = card.locator("tr.line").first();
+    await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await row.hover();
+    await row.locator(".add-comment-btn").click();
+    await page.fill('tr.form-row textarea[name="text"]', "context note");
+    await page.click('tr.form-row button[type="submit"]');
+    // It shows in the stack even though the file has no diff card.
+    await expect(page.locator(".stack-entry", { hasText: "context note" })).toBeVisible();
+    const stored = app.readStore().comments.find((c) => c.text === "context note");
+    expect(stored.anchor.file).toBe("keep.txt");
   });
 
   test("handback: exits 0 with counts and an export for the agent", async ({ page }) => {

@@ -1,7 +1,9 @@
 // Package diffmode is the git-diff review surface: a GitHub-style
-// "files changed" view over a repository's working tree, branch, or
-// combined changes, with line-anchored threads persisted in the sidecar
-// store under .git/planman.
+// "files changed" view over any base⟵head comparison in a repository —
+// commits, branches, the index, or the working tree — with line-anchored
+// threads persisted in the sidecar store under .git/planman. A history
+// navigator picks the two endpoints; preset ranges cover the common
+// pre-PR cases.
 package diffmode
 
 import (
@@ -20,37 +22,58 @@ import (
 	"github.com/olmesm/planman/internal/sidecar"
 )
 
+// rangeState is the current comparison plus view options.
+type rangeState struct {
+	base      string // ref or SHA (never a pseudo head)
+	head      string // ref, SHA, gitdiff.Worktree, or gitdiff.Index
+	mergeBase bool
+	view      string // "unified" | "split"
+	allFiles  bool
+}
+
 // Mode reviews a repository's diff.
 type Mode struct {
 	repo  *gitdiff.Repo
 	store *sidecar.Store
 
-	mu    sync.Mutex
-	scope gitdiff.Scope
-	base  string
-	view  string // "unified" | "split"
+	mu sync.Mutex
+	st rangeState
 }
 
 // New opens the repository containing path and prepares a diff review.
+// scope picks the initial preset (working, branch, or all); base
+// overrides the preset's base ref when set.
 func New(path, base, scope string) (*Mode, error) {
 	repo, err := gitdiff.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	sc, err := gitdiff.ParseScope(scope)
+	m := &Mode{repo: repo, store: sidecar.NewStore(repo.GitDir)}
+	st, err := m.preset(scope)
 	if err != nil {
 		return nil, err
 	}
-	if base == "" {
-		base = repo.DefaultBase()
+	if base != "" {
+		st.base = base
 	}
-	return &Mode{
-		repo:  repo,
-		store: sidecar.NewStore(repo.GitDir),
-		scope: sc,
-		base:  base,
-		view:  "unified",
-	}, nil
+	st.view = "unified"
+	m.st = st
+	return m, nil
+}
+
+// preset maps a named range preset onto endpoints.
+func (m *Mode) preset(name string) (rangeState, error) {
+	switch name {
+	case "working", "":
+		return rangeState{base: "HEAD", head: gitdiff.Worktree}, nil
+	case "staged":
+		return rangeState{base: "HEAD", head: gitdiff.Index}, nil
+	case "branch":
+		return rangeState{base: m.repo.DefaultBase(), head: "HEAD", mergeBase: true}, nil
+	case "all":
+		return rangeState{base: m.repo.DefaultBase(), head: gitdiff.Worktree, mergeBase: true}, nil
+	}
+	return rangeState{}, fmt.Errorf("invalid scope %q (working, staged, branch, or all)", name)
 }
 
 // Root returns the repository root.
@@ -65,38 +88,74 @@ func (m *Mode) Title() string { return filepath.Base(m.repo.Root) }
 // Store implements server.Mode.
 func (m *Mode) Store() review.Store { return m.store }
 
-// ApplyQuery implements server.Mode: scope, base, and view parameters
-// update the session's view state.
+// validRef accepts a ref usable as an endpoint.
+func (m *Mode) validRef(ref string, allowPseudo bool) bool {
+	if gitdiff.IsPseudo(ref) {
+		return allowPseudo
+	}
+	sha, err := m.repo.ResolveSHA(ref)
+	return err == nil && sha != ""
+}
+
+// ApplyQuery implements server.Mode: preset, base, head, merge-base,
+// all-files, and view parameters update the session's state.
 func (m *Mode) ApplyQuery(q url.Values) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if v := q.Get("scope"); v != "" {
-		if sc, err := gitdiff.ParseScope(v); err == nil {
-			m.scope = sc
+	if p := q.Get("preset"); p != "" {
+		if st, err := m.preset(p); err == nil {
+			st.view, st.allFiles = m.st.view, m.st.allFiles
+			m.st = st
 		}
 	}
-	if v := q.Get("base"); v != "" {
-		m.base = v
+	if v := q.Get("base"); v != "" && m.validRef(v, false) {
+		m.st.base = v
+	}
+	if v := q.Get("head"); v != "" && m.validRef(v, true) {
+		m.st.head = v
+	}
+	if v := q.Get("mb"); v != "" {
+		m.st.mergeBase = v == "1"
+	}
+	if v := q.Get("files"); v != "" {
+		m.st.allFiles = v == "all"
 	}
 	switch q.Get("view") {
 	case "split":
-		m.view = "split"
+		m.st.view = "split"
 	case "unified":
-		m.view = "unified"
+		m.st.view = "unified"
 	}
 }
 
-func (m *Mode) state() (gitdiff.Scope, string, string) {
+func (m *Mode) state() rangeState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.scope, m.base, m.view
+	return m.st
 }
 
-// Content implements server.Mode: compute the diff, re-anchor the
-// stored threads against it, and build the view model.
+// headLabel renders an endpoint for humans.
+func headLabel(ref string) string {
+	switch ref {
+	case gitdiff.Worktree:
+		return "Working tree"
+	case gitdiff.Index:
+		return "Staged"
+	}
+	if len(ref) == 40 {
+		return gitdiff.ShortSHA(ref)
+	}
+	return ref
+}
+
+// Content implements server.Mode: compute the diff for the current
+// range, re-anchor the stored threads against it, and build the view
+// model — files, tree, history graph, and comment stack.
 func (m *Mode) Content() (string, any, error) {
-	scope, base, view := m.state()
-	d, err := m.repo.Diff(gitdiff.Options{Scope: scope, Base: base})
+	st := m.state()
+	d, err := m.repo.DiffRange(gitdiff.RangeOptions{
+		Base: st.base, Head: st.head, MergeBase: st.mergeBase,
+	})
 	if err != nil {
 		return "", nil, err
 	}
@@ -106,19 +165,46 @@ func (m *Mode) Content() (string, any, error) {
 	}
 
 	data := &contentData{
-		Scope:     string(scope),
-		Base:      d.Base,
-		View:      view,
+		Base:      st.base,
+		Head:      st.head,
+		BaseLabel: headLabel(st.base),
+		HeadLabel: headLabel(st.head),
+		EffBase:   gitdiff.ShortSHA(d.BaseSHA),
+		MergeBase: st.mergeBase,
+		View:      st.view,
+		AllFiles:  st.allFiles,
 		NumFiles:  len(d.Files),
 		TotalAdds: d.TotalAdditions(),
 		TotalDels: d.TotalDeletions(),
 	}
 	placed := m.placeThreads(d, comments, data)
 	for _, f := range d.Files {
-		data.Files = append(data.Files, buildFileVM(f, view, placed[f.Path()]))
+		data.Files = append(data.Files, buildFileVM(f, st.view, placed[f.Path()]))
 	}
-	data.Tree = buildTree(data.Files)
+	data.Tree = m.buildNavTree(data.Files, st)
+	data.History = m.buildHistory(st, d)
+	data.Stack = buildStack(comments)
 	return "diff", data, nil
+}
+
+// buildNavTree builds the sidebar tree: the changed files, plus every
+// other file at the head endpoint when all-files is on.
+func (m *Mode) buildNavTree(changed []*fileVM, st rangeState) []*treeNode {
+	entries := changed
+	if st.allFiles {
+		if all, err := m.repo.ListFiles(st.head); err == nil {
+			changedSet := map[string]bool{}
+			for _, f := range changed {
+				changedSet[f.Path] = true
+			}
+			for _, path := range all {
+				if !changedSet[path] {
+					entries = append(entries, &fileVM{Path: path, Status: "unchanged"})
+				}
+			}
+		}
+	}
+	return buildTree(entries)
 }
 
 // placeThreads assigns each stored thread to its diff row, re-anchoring
@@ -225,8 +311,7 @@ type formData struct {
 }
 
 func (m *Mode) colspan() int {
-	_, _, view := m.state()
-	if view == "split" {
+	if m.state().view == "split" {
 		return 4
 	}
 	return 3
@@ -261,10 +346,33 @@ func (m *Mode) CommentForm(q url.Values) (string, any, error) {
 	}, nil
 }
 
-// Anchor implements server.Mode.
+// rangeRef resolves the current comparison for stamping onto anchors.
+func (m *Mode) rangeRef() (base, head, baseSHA, headSHA string) {
+	st := m.state()
+	base, head = st.base, st.head
+	committish := head
+	if gitdiff.IsPseudo(head) {
+		committish = "HEAD"
+	} else {
+		headSHA, _ = m.repo.ResolveSHA(head)
+	}
+	baseSHA, _ = m.repo.ResolveSHA(base)
+	if st.mergeBase {
+		if hs, err := m.repo.ResolveSHA(committish); err == nil && hs != "" && baseSHA != "" {
+			if mb, err := m.repo.MergeBase(baseSHA, hs); err == nil && mb != "" {
+				baseSHA = mb
+			}
+		}
+	}
+	return base, head, baseSHA, headSHA
+}
+
+// Anchor implements server.Mode: line anchors carry the comparison they
+// were made against.
 func (m *Mode) Anchor(v url.Values) (review.Anchor, error) {
+	base, head, baseSHA, headSHA := m.rangeRef()
 	if v.Get("page") == "1" {
-		return review.Anchor{Page: true}, nil
+		return review.Anchor{Page: true, Base: base, Head: head, BaseSHA: baseSHA, HeadSHA: headSHA}, nil
 	}
 	line, err := strconv.Atoi(v.Get("line"))
 	if err != nil || line < 1 {
@@ -283,18 +391,31 @@ func (m *Mode) Anchor(v url.Values) (review.Anchor, error) {
 		Side:    side,
 		Line:    line,
 		Context: v.Get("context"),
+		Base:    base,
+		Head:    head,
+		BaseSHA: baseSHA,
+		HeadSHA: headSHA,
 	}, nil
 }
 
-// Watch implements server.Mode: poll the repository state (HEAD +
-// worktree status) and fire on any change.
+// Watch implements server.Mode: poll the repository state (HEAD,
+// worktree status, and the selected endpoints) and fire on any change.
 func (m *Mode) Watch(onChange func()) error {
-	last := m.repo.StateFingerprint()
+	fingerprint := func() string {
+		st := m.state()
+		b, _ := m.repo.ResolveSHA(st.base)
+		h := ""
+		if !gitdiff.IsPseudo(st.head) {
+			h, _ = m.repo.ResolveSHA(st.head)
+		}
+		return m.repo.StateFingerprint() + "\x00" + b + "\x00" + h
+	}
+	last := fingerprint()
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			if fp := m.repo.StateFingerprint(); fp != last {
+			if fp := fingerprint(); fp != last {
 				last = fp
 				onChange()
 			}
@@ -303,21 +424,20 @@ func (m *Mode) Watch(onChange func()) error {
 	return nil
 }
 
-// RegisterRoutes implements server.Mode: hunk-context expansion.
+// newSideRef is the endpoint backing the diff's new side.
+func (m *Mode) newSideRef() string {
+	return m.state().head
+}
+
+// RegisterRoutes implements server.Mode: hunk-context expansion and
+// full-file browsing.
 func (m *Mode) RegisterRoutes(mux *http.ServeMux, s *server.Server) {
 	mux.HandleFunc("GET /expand", func(w http.ResponseWriter, r *http.Request) {
 		m.handleExpand(w, r, s)
 	})
-}
-
-// newSideRef is the revision backing the diff's new side: HEAD for
-// branch scope, the worktree otherwise.
-func (m *Mode) newSideRef() string {
-	scope, _, _ := m.state()
-	if scope == gitdiff.ScopeBranch {
-		return "HEAD"
-	}
-	return ""
+	mux.HandleFunc("GET /file", func(w http.ResponseWriter, r *http.Request) {
+		m.handleFullFile(w, r, s)
+	})
 }
 
 func (m *Mode) handleExpand(w http.ResponseWriter, r *http.Request, s *server.Server) {
@@ -343,7 +463,7 @@ func (m *Mode) handleExpand(w http.ResponseWriter, r *http.Request, s *server.Se
 		http.Error(w, "range out of file", http.StatusBadRequest)
 		return
 	}
-	_, _, view := m.state()
+	view := m.state().view
 	lexer := highlight.LexerForFile(file)
 
 	if view == "split" {
@@ -375,12 +495,66 @@ func (m *Mode) handleExpand(w http.ResponseWriter, r *http.Request, s *server.Se
 	s.RenderTemplate(w, "diff-unified-rows", rows)
 }
 
+// handleFullFile renders an unchanged file in full as a reviewable
+// card, with any stored threads for it attached by content match.
+func (m *Mode) handleFullFile(w http.ResponseWriter, r *http.Request, s *server.Server) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	lines, err := m.repo.FileLines(m.newSideRef(), path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	comments, _ := m.store.List()
+	threadsAt := map[int][]*review.Comment{}
+	for _, c := range comments {
+		if c.Anchor.Page || c.Anchor.File != path || c.Anchor.Side != review.SideNew {
+			continue
+		}
+		line := c.Anchor.Line
+		if line < 1 || line > len(lines) || (c.Anchor.Context != "" && lines[line-1] != c.Anchor.Context) {
+			line = 0
+			for i, text := range lines {
+				if c.Anchor.Context != "" && text == c.Anchor.Context {
+					line = i + 1
+					break
+				}
+			}
+		}
+		if line > 0 {
+			threadsAt[line] = append(threadsAt[line], c)
+		}
+	}
+
+	lexer := highlight.LexerForFile(path)
+	vm := &fullFileVM{Path: path}
+	for i, text := range lines {
+		vm.Rows = append(vm.Rows, &uRow{
+			Kind:     "line",
+			LineKind: "context",
+			Marker:   " ",
+			OldNo:    i + 1,
+			NewNo:    i + 1,
+			HTML:     htmlOf(lexer, text),
+			File:     path,
+			Side:     string(review.SideNew),
+			Line:     i + 1,
+			Context:  text,
+			Threads:  threadsAt[i+1],
+		})
+	}
+	s.RenderTemplate(w, "full-file", vm)
+}
+
 // Healthz implements server.Mode.
 func (m *Mode) Healthz() map[string]any {
-	scope, base, _ := m.state()
+	st := m.state()
 	return map[string]any{
-		"root":  m.repo.Root,
-		"scope": string(scope),
-		"base":  base,
+		"root": m.repo.Root,
+		"base": st.base,
+		"head": st.head,
 	}
 }
