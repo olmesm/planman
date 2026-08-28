@@ -157,8 +157,12 @@ test.describe("planman diff review flow", () => {
     await page.click('tr.form-row button[type="submit"]');
     await expect(page.locator(".comment", { hasText: "sticky note" })).toBeVisible();
 
-    // Prepend lines so the commented line moves from 1 to 3.
+    // Prepend lines so the commented line moves from 1 to 3. Source
+    // changes surface as a refresh banner rather than yanking the view.
     app.repo.write("notes.txt", "buy eggs\nbuy bread\nremember the milk\n");
+    await expect(page.locator("#refresh-banner")).toBeVisible({ timeout: 10_000 });
+    await page.click("#refresh-banner-go");
+    await expect(page.locator("#refresh-banner")).toBeHidden();
     const moved = page.locator('.file[data-path="notes.txt"] tr.line', { hasText: "remember the milk" });
     await expect(moved).toBeVisible({ timeout: 10_000 });
     await expect(

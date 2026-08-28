@@ -55,6 +55,12 @@ type Anchor struct {
 	Line    int    `json:"line,omitempty"`
 	Context string `json:"context,omitempty"`
 
+	// StartLine widens a diff anchor to a range [StartLine, Line] on the
+	// same side. Line stays the canonical anchor — placement and
+	// re-anchoring key on it — so files written before ranges existed
+	// load unchanged (StartLine zero means single-line).
+	StartLine int `json:"start_line,omitempty"`
+
 	// Diff anchors also record the comparison the thread was created
 	// against — the selected refs plus the SHAs they resolved to at the
 	// time — so a review can navigate back to that exact point later.

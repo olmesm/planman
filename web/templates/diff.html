@@ -51,6 +51,17 @@
             title="List every file at the head endpoint in the sidebar, not just changed ones"
             hx-get="/content?files={{if .AllFiles}}changed{{else}}all{{end}}"
             hx-target="#content" hx-swap="innerHTML">all files</button>
+    <button class="btn btn-small toggle-btn{{if .IgnoreWS}} active{{end}}" id="ws-toggle"
+            title="Hide whitespace-only changes (git diff -w)"
+            hx-get="/content?ws={{if .IgnoreWS}}0{{else}}1{{end}}"
+            hx-target="#content" hx-swap="innerHTML">hide whitespace</button>
+    <button class="btn btn-small" id="copy-review-btn"
+            title="Copy all review comments as markdown">Copy review</button>
+    {{if .HasWalkthrough}}
+    <button class="btn btn-small walk-chip" id="walkthrough-btn"
+            title="Step through the agent's guided tour of this diff"
+            hx-get="/walkthrough" hx-target="#content" hx-swap="innerHTML">▸ Walkthrough</button>
+    {{end}}
     <span class="view-toggle">
       <button class="btn btn-small{{if eq .View "unified"}} active{{end}}"
               hx-get="/content?view=unified" hx-target="#content" hx-swap="innerHTML">Unified</button>
@@ -113,6 +124,7 @@
   </nav>
   {{end}}
 </div>
+<div class="sidebar-handle" title="Drag to resize the sidebar; drag closed to collapse"></div>
 {{end}}
 <div class="diff-files">
 {{range .Files}}
@@ -122,6 +134,10 @@
     <span class="file-status st-{{.Status}}">{{.Status}}</span>
     <span class="file-path">{{.DisplayPath}}</span>
     <button class="icon-btn copy-path" title="Copy file path" data-path="{{.Path}}">⧉</button>
+    {{if .Markdown}}
+    <button class="btn btn-small md-preview-btn" data-path="{{.Path}}"
+            title="Toggle between the diff and the rendered document">Preview</button>
+    {{end}}
     <span class="file-stats">
       {{if .Binary}}BIN{{else}}<span class="stat-add">+{{.Additions}}</span> <span class="stat-del">−{{.Deletions}}</span>{{end}}
     </span>
@@ -130,7 +146,16 @@
     </label>
   </header>
   <div class="file-body">
-    {{if .Binary}}
+    {{if .Image}}
+    <div class="image-diff">
+      {{if .Image.OldURL}}
+      <figure><figcaption>Before</figcaption><img src="{{.Image.OldURL}}" alt="{{.Path}} (base)"></figure>
+      {{end}}
+      {{if .Image.NewURL}}
+      <figure><figcaption>After</figcaption><img src="{{.Image.NewURL}}" alt="{{.Path}} (head)"></figure>
+      {{end}}
+    </div>
+    {{else if .Binary}}
     <div class="binary-note">Binary file not shown</div>
     {{else if and (eq (len .SRows) 0) (eq (len .URows) 0)}}
     <div class="binary-note">No content changes</div>
@@ -209,7 +234,7 @@
 {{define "diff-unified-rows"}}
 {{range .}}
 {{if eq .Kind "hunk"}}
-<tr class="hunk-row"><td class="num"></td><td class="num"></td><td class="code hunk-head">{{.Header}}</td></tr>
+<tr class="hunk-row"{{if .HunkID}} data-hunk-id="{{.HunkID}}"{{end}}><td class="num"></td><td class="num"></td><td class="code hunk-head">{{.Header}}</td></tr>
 {{else if eq .Kind "expander"}}
 <tr class="expander-row"><td colspan="3">
   <button class="expander-btn"
@@ -219,7 +244,7 @@
   </button>
 </td></tr>
 {{else}}
-<tr class="line {{.LineKind}}">
+<tr class="line {{.LineKind}}{{if .InRange}} in-range{{end}}" data-file="{{.File}}" data-side="{{.Side}}" data-line="{{.Line}}">
   <td class="num old">{{if .OldNo}}{{.OldNo}}{{end}}</td>
   <td class="num new">{{if .NewNo}}{{.NewNo}}{{end}}</td>
   <td class="code chroma"><button class="add-comment-btn" title="Comment on this line"
@@ -238,7 +263,7 @@
 {{define "diff-split-rows"}}
 {{range .}}
 {{if eq .Kind "hunk"}}
-<tr class="hunk-row"><td class="num"></td><td class="code hunk-head" colspan="3">{{.Header}}</td></tr>
+<tr class="hunk-row"{{if .HunkID}} data-hunk-id="{{.HunkID}}"{{end}}><td class="num"></td><td class="code hunk-head" colspan="3">{{.Header}}</td></tr>
 {{else if eq .Kind "expander"}}
 <tr class="expander-row"><td colspan="4">
   <button class="expander-btn"
@@ -265,8 +290,8 @@
 {{if eq .Kind "empty"}}
 <td class="num"></td><td class="code empty"></td>
 {{else}}
-<td class="num {{.Kind}}">{{.No}}</td>
-<td class="code chroma {{.Kind}}"><button class="add-comment-btn" title="Comment on this line"
+<td class="num {{.Kind}}{{if .InRange}} in-range{{end}}" data-file="{{.File}}" data-side="{{.Side}}" data-line="{{.Line}}">{{.No}}</td>
+<td class="code chroma {{.Kind}}{{if .InRange}} in-range{{end}}" data-file="{{.File}}" data-side="{{.Side}}" data-line="{{.Line}}"><button class="add-comment-btn" title="Comment on this line"
       hx-get="/comment-form?file={{urlquery .File}}&side={{.Side}}&line={{.Line}}&context={{urlquery .Context}}"
       hx-target="closest tr" hx-swap="afterend">+</button><span class="code-text">{{.HTML}}</span></td>
 {{end}}

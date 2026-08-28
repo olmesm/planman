@@ -32,6 +32,7 @@
   <div class="comment-head">
     <span class="comment-author">{{if .Author}}{{.Author}}{{else}}anonymous{{end}}</span>
     <span class="comment-ts">{{fmtTime .Ts}}</span>
+    {{if .Anchor.StartLine}}<span class="range-lines">lines {{.Anchor.StartLine}}–{{.Anchor.Line}}</span>{{end}}
     {{if .Resolved}}<span class="status-chip">Resolved</span>{{end}}
     <span class="comment-actions">
       {{if .Resolved}}
@@ -45,14 +46,14 @@
               hx-delete="/comments/{{.ID}}" hx-target="#content" hx-swap="innerHTML">×</button>
     </span>
   </div>
-  <div class="comment-text">{{.Text}}</div>
+  <div class="comment-text">{{mdText .Text}}</div>
   {{range .Replies}}
   <div class="reply">
     <div class="comment-head">
       <span class="comment-author">{{if .Author}}{{.Author}}{{else}}anonymous{{end}}</span>
       <span class="comment-ts">{{fmtTime .Ts}}</span>
     </div>
-    <div class="comment-text">{{.Text}}</div>
+    <div class="comment-text">{{mdText .Text}}</div>
   </div>
   {{end}}
   <form class="reply-form" hx-post="/comments/{{.ID}}/reply" hx-target="#content"

@@ -161,6 +161,10 @@ type RangeOptions struct {
 	// MergeBase diffs from merge-base(Base, Head) instead of Base
 	// itself — three-dot semantics, the usual choice for branch review.
 	MergeBase bool
+	// IgnoreWhitespace passes -w: whitespace-only changes drop out of
+	// the patch. File fingerprints change with it, so client-side viewed
+	// state resets for affected files.
+	IgnoreWhitespace bool
 }
 
 // LineKind classifies a diff row.
@@ -187,7 +191,20 @@ type Hunk struct {
 	NewStart, NewCount int
 	Section            string
 	Rows               []Row
+	// Ordinal is the hunk's 1-based position within its file, giving it
+	// a stable id (path:hN) for the current diff — used by walkthroughs
+	// and keyboard navigation. Ids are only meaningful against the diff
+	// they were computed from; any change to the range renumbers them.
+	Ordinal int
 }
+
+// HunkID names a hunk within the current diff: "path:hN".
+func HunkID(path string, ordinal int) string {
+	return fmt.Sprintf("%s:h%d", path, ordinal)
+}
+
+// ID is the hunk's id within the given file path.
+func (h *Hunk) ID(path string) string { return HunkID(path, h.Ordinal) }
 
 // FileStatus classifies a changed file.
 type FileStatus string
@@ -296,6 +313,9 @@ func (r *Repo) DiffRange(o RangeOptions) (*Diff, error) {
 
 	diffArgs := []string{"diff", "--no-color", "--no-ext-diff", "--find-renames",
 		"--src-prefix=a/", "--dst-prefix=b/", "-U3"}
+	if o.IgnoreWhitespace {
+		diffArgs = append(diffArgs, "-w")
+	}
 
 	var patch string
 	var err error
@@ -365,13 +385,14 @@ func parsePatch(patch string) ([]*File, error) {
 
 		hasher := sha256.New()
 		hasher.Write([]byte(f.OldPath + "\x00" + f.NewPath))
-		for _, h := range fd.Hunks {
+		for hi, h := range fd.Hunks {
 			hunk := &Hunk{
 				OldStart: int(h.OrigStartLine),
 				OldCount: int(h.OrigLines),
 				NewStart: int(h.NewStartLine),
 				NewCount: int(h.NewLines),
 				Section:  h.Section,
+				Ordinal:  hi + 1,
 			}
 			hasher.Write(h.Body)
 			oldN, newN := hunk.OldStart, hunk.NewStart
@@ -460,7 +481,7 @@ func (r *Repo) untrackedFiles() ([]*File, error) {
 			continue
 		}
 		lines := splitLines(string(b))
-		hunk := &Hunk{OldStart: 0, OldCount: 0, NewStart: 1, NewCount: len(lines)}
+		hunk := &Hunk{OldStart: 0, OldCount: 0, NewStart: 1, NewCount: len(lines), Ordinal: 1}
 		for i, line := range lines {
 			hunk.Rows = append(hunk.Rows, Row{Kind: Add, NewLine: i + 1, Text: line})
 		}
@@ -499,6 +520,30 @@ func (r *Repo) FileLines(ref, path string) ([]string, error) {
 			return nil, err
 		}
 		return splitLines(out), nil
+	}
+}
+
+// FileBytes returns a file's raw content at the given endpoint, for
+// serving binary blobs (image previews).
+func (r *Repo) FileBytes(ref, path string) ([]byte, error) {
+	if strings.Contains(path, "..") {
+		return nil, fmt.Errorf("invalid path %q", path)
+	}
+	switch ref {
+	case Worktree, "":
+		return os.ReadFile(filepath.Join(r.Root, path))
+	case Index:
+		out, err := r.gitRaw("show", ":"+path)
+		if err != nil {
+			return nil, err
+		}
+		return []byte(out), nil
+	default:
+		out, err := r.gitRaw("show", ref+":"+path)
+		if err != nil {
+			return nil, err
+		}
+		return []byte(out), nil
 	}
 }
 

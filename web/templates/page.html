@@ -36,6 +36,57 @@
       {{end}}
     </div>
   </header>
+  {{if eq .Mode "diff"}}
+  <div class="overlay-backdrop" id="palette-backdrop" hidden>
+    <div class="palette" id="palette" role="dialog" aria-label="Command palette">
+      <input type="text" id="palette-input" autocomplete="off" spellcheck="false"
+             placeholder="Type to filter…">
+      <div class="palette-list" id="palette-list"></div>
+    </div>
+  </div>
+
+  <div class="search-bar" id="search-bar" hidden>
+    <input type="text" id="search-input" autocomplete="off" spellcheck="false"
+           placeholder="Find in diffs…">
+    <span class="search-count" id="search-count"></span>
+    <button class="icon-btn" id="search-prev" title="Previous match (Shift+Enter)">↑</button>
+    <button class="icon-btn" id="search-next" title="Next match (Enter)">↓</button>
+    <button class="icon-btn" id="search-close" title="Close (Esc)">×</button>
+  </div>
+
+  <div class="kbd-help" id="kbd-help" hidden>
+    <div class="kbd-help-panel">
+      <div class="kbd-help-title">Keyboard shortcuts <span class="kbd-help-hint">release ? to dismiss</span></div>
+      <div class="kbd-help-cols">
+        <dl>
+          <dt>Navigation</dt>
+          <dd><kbd>j</kbd>/<kbd>k</kbd> next / previous hunk</dd>
+          <dd><kbd>n</kbd>/<kbd>p</kbd> next / previous file</dd>
+          <dd><kbd>Enter</kbd> comment on current hunk</dd>
+          <dd><kbd>v</kbd> toggle viewed on current file</dd>
+          <dd><kbd>Ctrl/⌘ B</kbd> toggle sidebar</dd>
+        </dl>
+        <dl>
+          <dt>Search</dt>
+          <dd><kbd>Ctrl/⌘ F</kbd> find in diffs</dd>
+          <dd><kbd>Ctrl/⌘ P</kbd> go to file</dd>
+          <dd><kbd>Ctrl/⌘ ⇧ P</kbd> command palette</dd>
+        </dl>
+        <dl>
+          <dt>History panel</dt>
+          <dd><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>space</kbd> compare · <kbd>b</kbd> base</dd>
+          <dt>Definitions</dt>
+          <dd><kbd>Ctrl/⌘ click</kbd> jump to definition</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  {{end}}
+  <div class="refresh-banner" id="refresh-banner" hidden>
+    <span>Local changes detected — the review may be out of date.</span>
+    <button class="btn btn-small btn-primary" id="refresh-banner-go">Refresh</button>
+    <button class="icon-btn" id="refresh-banner-dismiss" title="Dismiss until the next change">×</button>
+  </div>
   <main id="main">
     <div id="content">{{.Content}}</div>
   </main>

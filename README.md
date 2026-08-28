@@ -10,7 +10,10 @@ in Go. Two surfaces, one workflow:
 - **`planman diff`** — a GitHub-style **Files changed** review of a git
   repo's uncommitted or unpushed work, in the spirit of
   [prequel](https://github.com/mdesjardins/prequel): unified or split
-  view, word-level diff highlighting, line comments, resolve/reopen.
+  view, word-level diff highlighting, line and range comments,
+  resolve/reopen — plus keyboard-first navigation, find-in-diffs,
+  definition jumps, and agent-authored walkthroughs in the spirit of
+  [codiff](https://github.com/nkzw-tech/codiff).
 
 Either way the process **blocks** while you review; when you hit
 **Hand back to agent** it exits and the agent picks up your comments.
@@ -93,8 +96,10 @@ the common cases:
 endpoint in the sidebar, not just changed ones — click an unchanged
 file to open it in full as a reviewable card, comments included.
 
-Hover a line, hit **+**, and comment on it (either side of the diff).
-Threads support replies, resolve/reopen, and delete. Every thread
+Hover a line, hit **+**, and comment on it (either side of the diff) —
+or drag down the line-number gutter to comment on a **range of lines**.
+Comment bodies render as markdown. Threads support replies,
+resolve/reopen, and delete. Every thread
 records the comparison it was made against — the selected refs plus
 the SHAs they resolved to — and the **comment stack** in the sidebar
 lists all threads with those references: clicking one navigates the
@@ -103,9 +108,38 @@ show the agent exactly what an earlier state got right. (A thread made
 against the working tree re-anchors into the current state instead —
 uncommitted endpoints have no commit to return to.)
 
-The page follows the repository live: edit, stage, or commit and the
-diff refreshes over SSE — threads re-anchor to their line's content
-when the diff shifts underneath them.
+More toolbar tools: **hide whitespace** (`git diff -w`), **Copy
+review** (every thread as markdown, for pasting into a chat), a
+**Preview** toggle on markdown files (rendered document instead of the
+patch), and before/after previews for changed **images**. The sidebar
+is resizable — drag its handle, or drag it closed.
+
+**Keyboard-first.** `j`/`k` walk the hunks and `Enter` comments on the
+current hunk's changed lines; `n`/`p` jump between files, `v` marks the
+current file viewed. `Ctrl/⌘ F` is **find in diffs** — cross-file
+search with match cycling that dims non-matching files. `Ctrl/⌘ P`
+fuzzy-filters files, `Ctrl/⌘ ⇧ P` opens a command palette, `Ctrl/⌘ B`
+toggles the sidebar, and holding `?` shows the full shortcut sheet.
+Hold `Ctrl/⌘` and click an identifier to jump to its likely
+**definition** — a bounded `git grep` plus per-language declaration
+matching, no language server needed.
+
+The page follows the repository live over SSE: comment activity from
+other tabs or the agent refreshes silently, while edits to the repo
+itself surface a **refresh banner** so the diff never yanks around
+mid-review (the command palette can switch back to instant reload) —
+threads re-anchor to their line's content when the diff shifts
+underneath them.
+
+**Walkthroughs.** An agent can post a narrative walkthrough of the
+diff — chapters of stops, each explaining a few hunks in markdown —
+via the JSON API (`GET /api/hunks` for stable hunk ids, then
+`POST /api/walkthrough`). A **Walkthrough** chip appears and the
+review becomes a guided stepper: the agent's prose beside the live
+hunks (comments work inline), arrow keys to move, support-file notes
+and a suggested commit message at the end. If the diff drifts, the
+tour flags itself outdated and stale stops degrade gracefully. The
+bundled skill documents the authoring flow.
 
 Diff comments persist in `.git/planman/review.json` — per-repo,
 invisible to your worktree, never committed. On handback, planman also

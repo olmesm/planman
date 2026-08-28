@@ -66,6 +66,28 @@ func TestCommentAttachesToBlock(t *testing.T) {
 	}
 }
 
+func TestInlineEscapesRawHTML(t *testing.T) {
+	out := string(Inline("**bold** <script>alert(1)</script>\n\n<img src=x onerror=alert(1)>"))
+	if !strings.Contains(out, "<strong>bold</strong>") {
+		t.Errorf("markdown not rendered: %s", out)
+	}
+	for _, forbidden := range []string{"<script>", "<img"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("raw HTML %q not escaped: %s", forbidden, out)
+		}
+	}
+}
+
+func TestInlineRendersGFMAndCode(t *testing.T) {
+	out := string(Inline("~~gone~~\n\n```go\npackage main\n```"))
+	if !strings.Contains(out, "<del>gone</del>") {
+		t.Errorf("GFM strikethrough missing: %s", out)
+	}
+	if !strings.Contains(out, `class="highlight"`) {
+		t.Errorf("fenced code not highlighted: %s", out)
+	}
+}
+
 func TestPageCommentsSeparated(t *testing.T) {
 	doc := critic.Parse("Para.\n")
 	doc.AddComment(review.Anchor{Page: true}, "r", "whole doc note", time.Now())

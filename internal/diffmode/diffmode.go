@@ -20,6 +20,7 @@ import (
 	"github.com/olmesm/planman/internal/review"
 	"github.com/olmesm/planman/internal/server"
 	"github.com/olmesm/planman/internal/sidecar"
+	"github.com/olmesm/planman/internal/walkthrough"
 )
 
 // rangeState is the current comparison plus view options.
@@ -29,12 +30,14 @@ type rangeState struct {
 	mergeBase bool
 	view      string // "unified" | "split"
 	allFiles  bool
+	ignoreWS  bool
 }
 
 // Mode reviews a repository's diff.
 type Mode struct {
-	repo  *gitdiff.Repo
-	store *sidecar.Store
+	repo     *gitdiff.Repo
+	store    *sidecar.Store
+	walkPath string // walkthrough sidecar file
 
 	mu sync.Mutex
 	st rangeState
@@ -48,7 +51,11 @@ func New(path, base, scope string) (*Mode, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Mode{repo: repo, store: sidecar.NewStore(repo.GitDir)}
+	m := &Mode{
+		repo:     repo,
+		store:    sidecar.NewStore(repo.GitDir),
+		walkPath: walkthrough.Path(repo.GitDir),
+	}
 	st, err := m.preset(scope)
 	if err != nil {
 		return nil, err
@@ -104,7 +111,7 @@ func (m *Mode) ApplyQuery(q url.Values) {
 	defer m.mu.Unlock()
 	if p := q.Get("preset"); p != "" {
 		if st, err := m.preset(p); err == nil {
-			st.view, st.allFiles = m.st.view, m.st.allFiles
+			st.view, st.allFiles, st.ignoreWS = m.st.view, m.st.allFiles, m.st.ignoreWS
 			m.st = st
 		}
 	}
@@ -119,6 +126,9 @@ func (m *Mode) ApplyQuery(q url.Values) {
 	}
 	if v := q.Get("files"); v != "" {
 		m.st.allFiles = v == "all"
+	}
+	if v := q.Get("ws"); v != "" {
+		m.st.ignoreWS = v == "1"
 	}
 	switch q.Get("view") {
 	case "split":
@@ -154,7 +164,7 @@ func headLabel(ref string) string {
 func (m *Mode) Content() (string, any, error) {
 	st := m.state()
 	d, err := m.repo.DiffRange(gitdiff.RangeOptions{
-		Base: st.base, Head: st.head, MergeBase: st.mergeBase,
+		Base: st.base, Head: st.head, MergeBase: st.mergeBase, IgnoreWhitespace: st.ignoreWS,
 	})
 	if err != nil {
 		return "", nil, err
@@ -173,6 +183,7 @@ func (m *Mode) Content() (string, any, error) {
 		MergeBase: st.mergeBase,
 		View:      st.view,
 		AllFiles:  st.allFiles,
+		IgnoreWS:  st.ignoreWS,
 		NumFiles:  len(d.Files),
 		TotalAdds: d.TotalAdditions(),
 		TotalDels: d.TotalDeletions(),
@@ -184,6 +195,7 @@ func (m *Mode) Content() (string, any, error) {
 	data.Tree = m.buildNavTree(data.Files, st)
 	data.History = m.buildHistory(st, d)
 	data.Stack = buildStack(comments)
+	data.HasWalkthrough = m.hasWalkthrough()
 	return "diff", data, nil
 }
 
@@ -250,6 +262,7 @@ func (m *Mode) placeThreads(d *gitdiff.Diff, comments []*review.Comment, data *c
 			a := c.Anchor
 			a.File = f.Path()
 			a.Line = line
+			shiftRangeStart(&a, c.Anchor.Line)
 			_ = m.store.UpdateAnchor(c.ID, a)
 			c.Anchor = a
 			ft.byLine[threadKey{side: side, line: line}] = append(ft.byLine[threadKey{side: side, line: line}], c)
@@ -263,6 +276,19 @@ func (m *Mode) placeThreads(d *gitdiff.Diff, comments []*review.Comment, data *c
 		})
 	}
 	return placed
+}
+
+// shiftRangeStart moves a range anchor's start by the same delta its end
+// line just moved, degrading to single-line when the shifted start no
+// longer makes sense. The end line stays the canonical anchor.
+func shiftRangeStart(a *review.Anchor, oldEnd int) {
+	if a.StartLine == 0 {
+		return
+	}
+	a.StartLine += a.Line - oldEnd
+	if a.StartLine < 1 || a.StartLine >= a.Line {
+		a.StartLine = 0
+	}
 }
 
 // findRow locates the row at (side, line) in a file's hunks.
@@ -333,14 +359,20 @@ func (m *Mode) CommentForm(q url.Values) (string, any, error) {
 	if side != string(review.SideOld) && side != string(review.SideNew) {
 		return "", nil, fmt.Errorf("bad side")
 	}
+	fields := map[string]string{
+		"file":    q.Get("file"),
+		"side":    side,
+		"line":    strconv.Itoa(line),
+		"context": q.Get("context"),
+	}
+	placeholder := "Leave a comment…"
+	if start, err := strconv.Atoi(q.Get("start_line")); err == nil && start >= 1 && start < line {
+		fields["start_line"] = strconv.Itoa(start)
+		placeholder = fmt.Sprintf("Comment on lines %d–%d…", start, line)
+	}
 	return "diff-comment-form", formData{
-		Fields: map[string]string{
-			"file":    q.Get("file"),
-			"side":    side,
-			"line":    strconv.Itoa(line),
-			"context": q.Get("context"),
-		},
-		Placeholder: "Leave a comment…",
+		Fields:      fields,
+		Placeholder: placeholder,
 		Colspan:     m.colspan(),
 		Wrap:        true,
 	}, nil
@@ -386,7 +418,7 @@ func (m *Mode) Anchor(v url.Values) (review.Anchor, error) {
 	if file == "" {
 		return review.Anchor{}, fmt.Errorf("missing file")
 	}
-	return review.Anchor{
+	a := review.Anchor{
 		File:    file,
 		Side:    side,
 		Line:    line,
@@ -395,7 +427,11 @@ func (m *Mode) Anchor(v url.Values) (review.Anchor, error) {
 		Head:    head,
 		BaseSHA: baseSHA,
 		HeadSHA: headSHA,
-	}, nil
+	}
+	if start, err := strconv.Atoi(v.Get("start_line")); err == nil && start >= 1 && start < line {
+		a.StartLine = start
+	}
+	return a, nil
 }
 
 // Watch implements server.Mode: poll the repository state (HEAD,
@@ -437,6 +473,30 @@ func (m *Mode) RegisterRoutes(mux *http.ServeMux, s *server.Server) {
 	})
 	mux.HandleFunc("GET /file", func(w http.ResponseWriter, r *http.Request) {
 		m.handleFullFile(w, r, s)
+	})
+	mux.HandleFunc("GET /search", m.handleSearch)
+	mux.HandleFunc("GET /mdpreview", m.handleMarkdownPreview)
+	mux.HandleFunc("GET /blob", m.handleBlob)
+	mux.HandleFunc("GET /defs", m.handleDefs)
+	mux.HandleFunc("GET /walkthrough", func(w http.ResponseWriter, r *http.Request) {
+		m.handleWalkthroughView(w, r, s)
+	})
+	mux.HandleFunc("GET /api/hunks", m.handleHunksManifest)
+	mux.HandleFunc("GET /api/walkthrough", m.handleWalkthroughGet)
+	mux.HandleFunc("POST /api/walkthrough", func(w http.ResponseWriter, r *http.Request) {
+		m.handleWalkthroughPost(w, r, s)
+	})
+	mux.HandleFunc("DELETE /api/walkthrough", func(w http.ResponseWriter, r *http.Request) {
+		m.handleWalkthroughDelete(w, r, s)
+	})
+	mux.HandleFunc("GET /export.md", func(w http.ResponseWriter, r *http.Request) {
+		md, err := m.ExportMarkdown(time.Now())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_, _ = w.Write([]byte(md))
 	})
 }
 
@@ -553,8 +613,9 @@ func (m *Mode) handleFullFile(w http.ResponseWriter, r *http.Request, s *server.
 func (m *Mode) Healthz() map[string]any {
 	st := m.state()
 	return map[string]any{
-		"root": m.repo.Root,
-		"base": st.base,
-		"head": st.head,
+		"root":        m.repo.Root,
+		"base":        st.base,
+		"head":        st.head,
+		"walkthrough": m.hasWalkthrough(),
 	}
 }
