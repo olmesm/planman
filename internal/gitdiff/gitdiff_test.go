@@ -324,3 +324,42 @@ func TestHunkOrdinals(t *testing.T) {
 		t.Fatalf("HunkID: %s", got)
 	}
 }
+
+func TestParseGrepOutput(t *testing.T) {
+	out := "abc123:lib.go\x003\x00func Greet() string {\nabc123:main.go\x007\x00\tGreet()\n"
+	matches := parseGrepOutput(out, "abc123")
+	if len(matches) != 2 {
+		t.Fatalf("matches: %+v", matches)
+	}
+	if matches[0].Path != "lib.go" || matches[0].Line != 3 || matches[0].Text != "func Greet() string {" {
+		t.Fatalf("first match: %+v", matches[0])
+	}
+	if matches[1].Path != "main.go" {
+		t.Fatalf("revision prefix not stripped: %+v", matches[1])
+	}
+}
+
+func TestBoundedGrep(t *testing.T) {
+	repo := fixture(t)
+	// Worktree search sees untracked files.
+	matches, err := repo.BoundedGrep("brand", "", false, true, []string{"*.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].Path != "untracked.txt" || matches[0].Line != 1 {
+		t.Fatalf("matches: %+v", matches)
+	}
+	// Revision search sees committed content only.
+	matches, err = repo.BoundedGrep("println", repo.HeadSHA(), false, false, []string{"*.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].Path != "main.go" {
+		t.Fatalf("revision matches: %+v", matches)
+	}
+	// No matches is not an error.
+	matches, err = repo.BoundedGrep("nosuchtoken", "", false, true, []string{"*.go"})
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("no-match case: %v %+v", err, matches)
+	}
+}

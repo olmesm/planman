@@ -943,3 +943,65 @@ td.num.in-range { box-shadow: inset 3px 0 0 #d4a72c; }
 @media (max-width: 1000px) {
   .walk-rail { display: none; }
 }
+
+/* Definition navigation */
+body.def-mode td.code .code-text span:hover {
+  text-decoration: underline;
+  cursor: pointer;
+}
+.def-popover {
+  position: absolute;
+  z-index: 45;
+  width: min(430px, 90vw);
+  max-height: 22rem;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.28);
+  padding: 0.3rem;
+}
+.def-popover-head {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+}
+.def-popover-note { padding: 0.4rem 0.5rem; font-size: 0.82rem; color: var(--muted); }
+.def-candidate {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--fg);
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.def-candidate:hover { background: var(--surface); }
+.def-kind {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0 0.45em;
+  margin-right: 0.5rem;
+}
+.def-loc {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.def-candidate code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 0.1rem;
+}

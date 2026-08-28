@@ -620,6 +620,143 @@
     document.getElementById("search-close").addEventListener("click", closeSearch);
   }
 
+  // --- Definition navigation: hold Ctrl/Cmd to underline identifiers,
+  // Mod+click asks the server for likely definitions (git grep + a
+  // conservative declaration classifier — no language server).
+  var defPopover = null;
+  function closeDefPopover() {
+    if (defPopover) {
+      defPopover.remove();
+      defPopover = null;
+    }
+  }
+  var IDENT_RE = /^[$_A-Za-z][$\w]*$/;
+  function identFromClick(e) {
+    var t = e.target;
+    if (t.nodeType === 1 && t.closest(".code-text") && t !== t.closest(".code-text")) {
+      var txt = (t.textContent || "").trim();
+      if (IDENT_RE.test(txt)) return txt;
+    }
+    var pos = document.caretPositionFromPoint
+      ? document.caretPositionFromPoint(e.clientX, e.clientY)
+      : null;
+    var node = pos && pos.offsetNode;
+    if (node && node.nodeType === 3) {
+      var s = node.textContent;
+      var off = pos.offset;
+      var isw = function (ch) { return /[$\w]/.test(ch); };
+      var a = off;
+      while (a > 0 && isw(s[a - 1])) a--;
+      var b = off;
+      while (b < s.length && isw(s[b])) b++;
+      var word = s.slice(a, b);
+      if (IDENT_RE.test(word)) return word;
+    }
+    return null;
+  }
+  function navigateToDef(path, line) {
+    closeDefPopover();
+    var file = document.querySelector('section.file[data-path="' + CSS.escape(path) + '"]:not([data-full-file])');
+    var el = file &&
+      (file.querySelector('[data-side="new"][data-line="' + line + '"]') ||
+       file.querySelector('[data-side="old"][data-line="' + line + '"]'));
+    if (el) {
+      if (file.classList.contains("collapsed")) {
+        delete collapsed[file.dataset.path];
+        file.classList.remove("collapsed");
+      }
+      var row = el.closest("tr") || el;
+      row.scrollIntoView({ block: "center" });
+      row.classList.add("flash");
+      setTimeout(function () { row.classList.remove("flash"); }, 1500);
+      return;
+    }
+    // Not visible in the diff: open the file in full and jump there.
+    var full = 'section.file[data-full-file][data-path="' + CSS.escape(path) + '"]';
+    var existing = document.querySelector(full);
+    pendingScroll = full + ' tr[data-line="' + line + '"]';
+    if (existing) {
+      scrollPending();
+      return;
+    }
+    htmx.ajax("GET", "/file", {
+      target: "#extra-files",
+      swap: "beforeend",
+      values: { path: path },
+    });
+  }
+  function showDefPopover(e, ident, res) {
+    closeDefPopover();
+    var pop = document.createElement("div");
+    pop.className = "def-popover";
+    var head = document.createElement("div");
+    head.className = "def-popover-head";
+    head.textContent = ident;
+    pop.appendChild(head);
+    if (res.status !== "ready") {
+      var note = document.createElement("div");
+      note.className = "def-popover-note";
+      note.textContent = res.reason || "Definition search unavailable.";
+      pop.appendChild(note);
+    } else if (!res.candidates.length) {
+      var none = document.createElement("div");
+      none.className = "def-popover-note";
+      none.textContent = "No definition found.";
+      pop.appendChild(none);
+    } else {
+      res.candidates.forEach(function (c) {
+        var row = document.createElement("button");
+        row.className = "def-candidate";
+        var kind = document.createElement("span");
+        kind.className = "def-kind";
+        kind.textContent = c.kind;
+        var loc = document.createElement("span");
+        loc.className = "def-loc";
+        loc.textContent = c.path + ":" + c.line_number;
+        var code = document.createElement("code");
+        code.textContent = c.line;
+        row.appendChild(kind);
+        row.appendChild(loc);
+        row.appendChild(code);
+        row.addEventListener("click", function () {
+          navigateToDef(c.path, c.line_number);
+        });
+        pop.appendChild(row);
+      });
+    }
+    pop.style.left = Math.min(e.pageX, window.scrollX + window.innerWidth - 440) + "px";
+    pop.style.top = e.pageY + 12 + "px";
+    document.body.appendChild(pop);
+    defPopover = pop;
+  }
+  document.body.addEventListener("click", function (e) {
+    if (defPopover && !e.target.closest(".def-popover")) closeDefPopover();
+    if (!diffMode || !modKey(e)) return;
+    var code = e.target.closest && e.target.closest("td.code");
+    if (!code) return;
+    var src = code.dataset.file ? code : code.closest("tr.line");
+    if (!src || !src.dataset || !src.dataset.file) return;
+    var ident = identFromClick(e);
+    if (!ident) return;
+    e.preventDefault();
+    fetch(
+      "/defs?ident=" + encodeURIComponent(ident) +
+      "&file=" + encodeURIComponent(src.dataset.file) +
+      "&side=" + encodeURIComponent(src.dataset.side || "new")
+    )
+      .then(function (r) { return r.json(); })
+      .then(function (res) { showDefPopover(e, ident, res); });
+  });
+  document.body.addEventListener("keydown", function (e) {
+    if (e.key === "Control" || e.key === "Meta") document.body.classList.add("def-mode");
+  });
+  document.body.addEventListener("keyup", function (e) {
+    if (e.key === "Control" || e.key === "Meta") document.body.classList.remove("def-mode");
+  });
+  window.addEventListener("blur", function () {
+    document.body.classList.remove("def-mode");
+  });
+
   // --- Hold-? shortcut overlay.
   var kbdHelp = document.getElementById("kbd-help");
 
@@ -627,6 +764,7 @@
     if (!diffMode) return;
     // Escape closes overlays even while their inputs are focused.
     if (e.key === "Escape") {
+      if (defPopover) { closeDefPopover(); e.preventDefault(); return; }
       if (backdrop && !backdrop.hidden) { closePalette(); e.preventDefault(); return; }
       if (searchBar && !searchBar.hidden) { closeSearch(); e.preventDefault(); return; }
       return;

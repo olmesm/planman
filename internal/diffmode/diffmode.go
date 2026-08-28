@@ -477,6 +477,7 @@ func (m *Mode) RegisterRoutes(mux *http.ServeMux, s *server.Server) {
 	mux.HandleFunc("GET /search", m.handleSearch)
 	mux.HandleFunc("GET /mdpreview", m.handleMarkdownPreview)
 	mux.HandleFunc("GET /blob", m.handleBlob)
+	mux.HandleFunc("GET /defs", m.handleDefs)
 	mux.HandleFunc("GET /walkthrough", func(w http.ResponseWriter, r *http.Request) {
 		m.handleWalkthroughView(w, r, s)
 	})
