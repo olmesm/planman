@@ -39,7 +39,10 @@ Each comment has an `id`, `author`, `text`, `replies`, and an `anchor`:
   `side:"new"` lines are at the review's head endpoint (usually the
   worktree); `side:"old"` lines are from the base version (usually
   pointing at something that was removed or changed). Locate the code by
-  `context`, not just the line number — the file may have shifted. The
+  `context`, not just the line number — the file may have shifted. A
+  `start_line` field, when present, widens the anchor to the range
+  `start_line`–`line` on that side; `line` is always the range's end and
+  the anchored `context` line. The
   anchor also records `base`/`head` (and resolved `base_sha`/`head_sha`)
   — the comparison the reviewer was looking at when they wrote it; a
   head of `@worktree` or `@index` means uncommitted state at the time.

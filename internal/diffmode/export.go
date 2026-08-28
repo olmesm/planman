@@ -95,7 +95,11 @@ func exportMarkdown(p exportPayload) string {
 	writeThread := func(c *review.Comment) {
 		loc := ""
 		if !c.Anchor.Page {
-			loc = fmt.Sprintf("%s line %d, ", c.Anchor.Side, c.Anchor.Line)
+			if c.Anchor.StartLine > 0 {
+				loc = fmt.Sprintf("%s lines %d–%d, ", c.Anchor.Side, c.Anchor.StartLine, c.Anchor.Line)
+			} else {
+				loc = fmt.Sprintf("%s line %d, ", c.Anchor.Side, c.Anchor.Line)
+			}
 		}
 		fmt.Fprintf(&sb, "- **[%s]** (%s%s) %s: %s\n", c.ID, loc, c.Status, c.Author, c.Text)
 		if c.Anchor.Context != "" {

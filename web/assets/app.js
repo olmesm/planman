@@ -141,6 +141,70 @@
     }
   });
 
+  // --- Range comments: press on a line number and drag down (or up)
+  // the gutter to select a span, release to open the comment form on
+  // the span's last line.
+  var gutterDrag = null;
+  function gutterRef(el) {
+    var td = el.closest && el.closest("td.num");
+    if (!td) return null;
+    var src = td.dataset.line ? td : td.closest("tr.line");
+    if (!src || !src.dataset || !src.dataset.line || !src.dataset.side) return null;
+    return {
+      file: src.dataset.file,
+      side: src.dataset.side,
+      line: parseInt(src.dataset.line, 10),
+      el: td.closest("tr"),
+    };
+  }
+  function clearRangeSel() {
+    document.querySelectorAll(".range-sel").forEach(function (el) {
+      el.classList.remove("range-sel");
+    });
+  }
+  function markRangeSel(file, side, a, b) {
+    clearRangeSel();
+    var lo = Math.min(a, b);
+    var hi = Math.max(a, b);
+    var scope = document.querySelector('section.file[data-path="' + CSS.escape(file) + '"]');
+    if (!scope) return;
+    scope
+      .querySelectorAll('[data-side="' + side + '"][data-line]')
+      .forEach(function (el) {
+        var line = parseInt(el.dataset.line, 10);
+        if (line >= lo && line <= hi) (el.closest("tr") || el).classList.add("range-sel");
+      });
+  }
+  document.body.addEventListener("mousedown", function (e) {
+    if (e.button !== 0) return;
+    var ref = gutterRef(e.target);
+    if (!ref) return;
+    e.preventDefault(); // no text selection while dragging the gutter
+    gutterDrag = { start: ref, end: ref };
+  });
+  document.body.addEventListener("mouseover", function (e) {
+    if (!gutterDrag) return;
+    var ref = gutterRef(e.target);
+    if (!ref || ref.file !== gutterDrag.start.file || ref.side !== gutterDrag.start.side) return;
+    gutterDrag.end = ref;
+    markRangeSel(ref.file, ref.side, gutterDrag.start.line, ref.line);
+  });
+  document.body.addEventListener("mouseup", function () {
+    if (!gutterDrag) return;
+    var d = gutterDrag;
+    gutterDrag = null;
+    if (d.end.line === d.start.line) {
+      clearRangeSel();
+      return; // plain click: the per-line + button handles it
+    }
+    var first = d.start.line <= d.end.line ? d.start : d.end;
+    var last = d.start.line <= d.end.line ? d.end : d.start;
+    openCommentForm(
+      { file: last.file, side: last.side, line: last.line, el: last.el },
+      first.line
+    );
+  });
+
   // --- Keyboard: one dispatcher with explicit precedence — overlays
   // first, then the history panel while it is open, then global diff
   // navigation. Guarded so shortcuts never fire while typing.
@@ -208,25 +272,79 @@
     }
     return lines;
   }
+  // rowInfo extracts the anchor identity of a diff row for the given
+  // change kind, handling both unified rows and split cells.
+  function rowInfo(rowEl, kind) {
+    if (rowEl.classList.contains(kind) && rowEl.dataset.line) {
+      return {
+        file: rowEl.dataset.file,
+        side: rowEl.dataset.side,
+        line: parseInt(rowEl.dataset.line, 10),
+        el: rowEl,
+      };
+    }
+    var td = rowEl.querySelector("td.code." + kind);
+    if (td && td.dataset.line) {
+      return {
+        file: td.dataset.file,
+        side: td.dataset.side,
+        line: parseInt(td.dataset.line, 10),
+        el: rowEl,
+      };
+    }
+    return null;
+  }
+  // contextTextOf reads the anchored line text back out of the row's
+  // comment-button URL, so client-built forms re-anchor like clicks do.
+  function contextTextOf(el, side) {
+    var btn =
+      el.querySelector('td.code[data-side="' + side + '"] .add-comment-btn') ||
+      el.querySelector(".add-comment-btn");
+    var hx = btn && btn.getAttribute("hx-get");
+    if (!hx || hx.indexOf("?") < 0) return "";
+    return new URLSearchParams(hx.slice(hx.indexOf("?") + 1)).get("context") || "";
+  }
+  function openCommentForm(info, startLine) {
+    var values = {
+      file: info.file,
+      side: info.side,
+      line: info.line,
+      context: contextTextOf(info.el, info.side),
+    };
+    if (startLine && startLine < info.line) values.start_line = startLine;
+    htmx.ajax("GET", "/comment-form", {
+      source: info.el,
+      target: info.el,
+      swap: "afterend",
+      values: values,
+    });
+  }
   function commentOnCurrentHunk() {
     var lines = currentHunkLines();
-    // Prefer the last added line, then the last deleted one.
-    var target = null;
-    for (var i = lines.length - 1; i >= 0 && !target; i--) {
-      if (lines[i].querySelector(".add-comment-btn") &&
-          (lines[i].classList.contains("add") || lines[i].querySelector("td.code.add"))) {
-        target = lines[i].querySelector("td.code.add .add-comment-btn") ||
-                 lines[i].querySelector(".add-comment-btn");
+    if (!lines.length) return;
+    // Prefer the last contiguous run of added lines, then deleted ones,
+    // then just the last line — commenting the span of the change.
+    function lastRun(kind) {
+      var run = [];
+      var best = null;
+      for (var i = 0; i < lines.length; i++) {
+        var info = rowInfo(lines[i], kind);
+        if (info) {
+          run.push(info);
+          best = run.slice();
+        } else if (run.length) {
+          run = [];
+        }
       }
+      return best;
     }
-    for (i = lines.length - 1; i >= 0 && !target; i--) {
-      if (lines[i].classList.contains("del") || lines[i].querySelector("td.code.del")) {
-        target = lines[i].querySelector("td.code.del .add-comment-btn") ||
-                 lines[i].querySelector(".add-comment-btn");
-      }
+    var run = lastRun("add") || lastRun("del");
+    if (run) {
+      openCommentForm(run[run.length - 1], run[0].line);
+      return;
     }
-    if (!target && lines.length) target = lines[lines.length - 1].querySelector(".add-comment-btn");
-    if (target) target.click();
+    var info = rowInfo(lines[lines.length - 1], "context");
+    if (info) openCommentForm(info, 0);
   }
   function fileNav(delta) {
     var files = Array.from(document.querySelectorAll("#content section.file"));

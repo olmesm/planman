@@ -810,3 +810,16 @@ tr.search-hit td { background: color-mix(in srgb, #d4a72c 25%, transparent); }
   padding: 0 0.3em;
   background: var(--surface);
 }
+
+/* Range comments: drag selection + persisted range tint */
+.diff-table td.num { cursor: pointer; user-select: none; }
+tr.range-sel td, td.range-sel { background: color-mix(in srgb, var(--accent) 14%, transparent) !important; }
+tr.line.in-range td:first-child { box-shadow: inset 3px 0 0 #d4a72c; }
+td.num.in-range { box-shadow: inset 3px 0 0 #d4a72c; }
+.range-lines {
+  font-size: 0.72rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.5em;
+}

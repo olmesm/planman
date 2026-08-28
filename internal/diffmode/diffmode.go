@@ -255,6 +255,7 @@ func (m *Mode) placeThreads(d *gitdiff.Diff, comments []*review.Comment, data *c
 			a := c.Anchor
 			a.File = f.Path()
 			a.Line = line
+			shiftRangeStart(&a, c.Anchor.Line)
 			_ = m.store.UpdateAnchor(c.ID, a)
 			c.Anchor = a
 			ft.byLine[threadKey{side: side, line: line}] = append(ft.byLine[threadKey{side: side, line: line}], c)
@@ -268,6 +269,19 @@ func (m *Mode) placeThreads(d *gitdiff.Diff, comments []*review.Comment, data *c
 		})
 	}
 	return placed
+}
+
+// shiftRangeStart moves a range anchor's start by the same delta its end
+// line just moved, degrading to single-line when the shifted start no
+// longer makes sense. The end line stays the canonical anchor.
+func shiftRangeStart(a *review.Anchor, oldEnd int) {
+	if a.StartLine == 0 {
+		return
+	}
+	a.StartLine += a.Line - oldEnd
+	if a.StartLine < 1 || a.StartLine >= a.Line {
+		a.StartLine = 0
+	}
 }
 
 // findRow locates the row at (side, line) in a file's hunks.
@@ -338,14 +352,20 @@ func (m *Mode) CommentForm(q url.Values) (string, any, error) {
 	if side != string(review.SideOld) && side != string(review.SideNew) {
 		return "", nil, fmt.Errorf("bad side")
 	}
+	fields := map[string]string{
+		"file":    q.Get("file"),
+		"side":    side,
+		"line":    strconv.Itoa(line),
+		"context": q.Get("context"),
+	}
+	placeholder := "Leave a comment…"
+	if start, err := strconv.Atoi(q.Get("start_line")); err == nil && start >= 1 && start < line {
+		fields["start_line"] = strconv.Itoa(start)
+		placeholder = fmt.Sprintf("Comment on lines %d–%d…", start, line)
+	}
 	return "diff-comment-form", formData{
-		Fields: map[string]string{
-			"file":    q.Get("file"),
-			"side":    side,
-			"line":    strconv.Itoa(line),
-			"context": q.Get("context"),
-		},
-		Placeholder: "Leave a comment…",
+		Fields:      fields,
+		Placeholder: placeholder,
 		Colspan:     m.colspan(),
 		Wrap:        true,
 	}, nil
@@ -391,7 +411,7 @@ func (m *Mode) Anchor(v url.Values) (review.Anchor, error) {
 	if file == "" {
 		return review.Anchor{}, fmt.Errorf("missing file")
 	}
-	return review.Anchor{
+	a := review.Anchor{
 		File:    file,
 		Side:    side,
 		Line:    line,
@@ -400,7 +420,11 @@ func (m *Mode) Anchor(v url.Values) (review.Anchor, error) {
 		Head:    head,
 		BaseSHA: baseSHA,
 		HeadSHA: headSHA,
-	}, nil
+	}
+	if start, err := strconv.Atoi(v.Get("start_line")); err == nil && start >= 1 && start < line {
+		a.StartLine = start
+	}
+	return a, nil
 }
 
 // Watch implements server.Mode: poll the repository state (HEAD,

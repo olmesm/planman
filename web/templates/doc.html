@@ -32,6 +32,7 @@
   <div class="comment-head">
     <span class="comment-author">{{if .Author}}{{.Author}}{{else}}anonymous{{end}}</span>
     <span class="comment-ts">{{fmtTime .Ts}}</span>
+    {{if .Anchor.StartLine}}<span class="range-lines">lines {{.Anchor.StartLine}}–{{.Anchor.Line}}</span>{{end}}
     {{if .Resolved}}<span class="status-chip">Resolved</span>{{end}}
     <span class="comment-actions">
       {{if .Resolved}}

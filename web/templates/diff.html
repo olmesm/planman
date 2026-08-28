@@ -226,7 +226,7 @@
   </button>
 </td></tr>
 {{else}}
-<tr class="line {{.LineKind}}" data-file="{{.File}}" data-side="{{.Side}}" data-line="{{.Line}}">
+<tr class="line {{.LineKind}}{{if .InRange}} in-range{{end}}" data-file="{{.File}}" data-side="{{.Side}}" data-line="{{.Line}}">
   <td class="num old">{{if .OldNo}}{{.OldNo}}{{end}}</td>
   <td class="num new">{{if .NewNo}}{{.NewNo}}{{end}}</td>
   <td class="code chroma"><button class="add-comment-btn" title="Comment on this line"
@@ -272,8 +272,8 @@
 {{if eq .Kind "empty"}}
 <td class="num"></td><td class="code empty"></td>
 {{else}}
-<td class="num {{.Kind}}" data-file="{{.File}}" data-side="{{.Side}}" data-line="{{.Line}}">{{.No}}</td>
-<td class="code chroma {{.Kind}}" data-file="{{.File}}" data-side="{{.Side}}" data-line="{{.Line}}"><button class="add-comment-btn" title="Comment on this line"
+<td class="num {{.Kind}}{{if .InRange}} in-range{{end}}" data-file="{{.File}}" data-side="{{.Side}}" data-line="{{.Line}}">{{.No}}</td>
+<td class="code chroma {{.Kind}}{{if .InRange}} in-range{{end}}" data-file="{{.File}}" data-side="{{.Side}}" data-line="{{.Line}}"><button class="add-comment-btn" title="Comment on this line"
       hx-get="/comment-form?file={{urlquery .File}}&side={{.Side}}&line={{.Line}}&context={{urlquery .Context}}"
       hx-target="closest tr" hx-swap="afterend">+</button><span class="code-text">{{.HTML}}</span></td>
 {{end}}

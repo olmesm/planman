@@ -216,7 +216,11 @@ func buildStack(comments []*review.Comment) []*stackEntry {
 			Loc:      "review",
 		}
 		if !c.Anchor.Page {
-			e.Loc = fmt.Sprintf("%s:%d", c.Anchor.File, c.Anchor.Line)
+			if c.Anchor.StartLine > 0 {
+				e.Loc = fmt.Sprintf("%s:%d–%d", c.Anchor.File, c.Anchor.StartLine, c.Anchor.Line)
+			} else {
+				e.Loc = fmt.Sprintf("%s:%d", c.Anchor.File, c.Anchor.Line)
+			}
 		}
 		if c.Anchor.Base != "" {
 			label := headLabel(c.Anchor.Head)
@@ -377,6 +381,7 @@ type uRow struct {
 	Side     string
 	Line     int
 	Context  string
+	InRange  bool // covered by a range comment
 	Threads  []*review.Comment
 }
 
@@ -388,6 +393,7 @@ type sCell struct {
 	Side    string
 	Line    int
 	Context string
+	InRange bool // covered by a range comment
 }
 
 type sRow struct {
@@ -484,6 +490,34 @@ type fileThreads struct {
 	orphans []*orphanVM
 }
 
+// rangeSet marks every row covered by a placed range comment, so the
+// view can tint the whole range, not just the anchored end line.
+func (ft *fileThreads) rangeSet() map[threadKey]bool {
+	if ft == nil {
+		return nil
+	}
+	var set map[threadKey]bool
+	for key, cs := range ft.byLine {
+		for _, c := range cs {
+			if c.Anchor.StartLine == 0 {
+				continue
+			}
+			if set == nil {
+				set = map[threadKey]bool{}
+			}
+			// The placed end line is key.line; cover the same span of
+			// rows above it that the stored range describes.
+			span := c.Anchor.Line - c.Anchor.StartLine
+			for l := key.line - span; l <= key.line; l++ {
+				if l >= 1 {
+					set[threadKey{side: key.side, line: l}] = true
+				}
+			}
+		}
+	}
+	return set
+}
+
 // buildFileVM renders one file for the requested view.
 func buildFileVM(f *gitdiff.File, view string, threads *fileThreads) *fileVM {
 	vm := &fileVM{
@@ -533,6 +567,7 @@ func anchorFor(r gitdiff.Row) (side string, line int) {
 func buildUnifiedRows(f *gitdiff.File, lexer chroma.Lexer, expandable bool, threads *fileThreads) []*uRow {
 	var rows []*uRow
 	path := f.Path()
+	ranged := threads.rangeSet()
 	addExpander := func(exp *expander) {
 		if expandable && exp.Count != 0 {
 			rows = append(rows, &uRow{Kind: "expander", Exp: exp})
@@ -555,6 +590,7 @@ func buildUnifiedRows(f *gitdiff.File, lexer chroma.Lexer, expandable bool, thre
 				Side:     side,
 				Line:     line,
 				Context:  r.Text,
+				InRange:  ranged[threadKey{side: side, line: line}],
 				Threads:  threadsFor(threads, side, line),
 			}
 			rows = append(rows, row)
@@ -569,6 +605,7 @@ func buildUnifiedRows(f *gitdiff.File, lexer chroma.Lexer, expandable bool, thre
 func buildSplitRows(f *gitdiff.File, lexer chroma.Lexer, expandable bool, threads *fileThreads) []*sRow {
 	var rows []*sRow
 	path := f.Path()
+	ranged := threads.rangeSet()
 	addExpander := func(exp *expander) {
 		if expandable && exp.Count != 0 {
 			rows = append(rows, &sRow{Kind: "expander", Exp: exp})
@@ -588,13 +625,16 @@ func buildSplitRows(f *gitdiff.File, lexer chroma.Lexer, expandable bool, thread
 			Side:    side,
 			Line:    line,
 			Context: r.Text,
+			InRange: ranged[threadKey{side: side, line: line}],
 		}
 	}
 	contextCells := func(r gitdiff.Row) (sCell, sCell) {
 		l := sCell{Kind: "context", No: r.OldLine, HTML: template.HTML(highlight.LineHTML(lexer, r.Text, nil)),
-			File: path, Side: string(review.SideOld), Line: r.OldLine, Context: r.Text}
+			File: path, Side: string(review.SideOld), Line: r.OldLine, Context: r.Text,
+			InRange: ranged[threadKey{side: string(review.SideOld), line: r.OldLine}]}
 		rr := sCell{Kind: "context", No: r.NewLine, HTML: l.HTML,
-			File: path, Side: string(review.SideNew), Line: r.NewLine, Context: r.Text}
+			File: path, Side: string(review.SideNew), Line: r.NewLine, Context: r.Text,
+			InRange: ranged[threadKey{side: string(review.SideNew), line: r.NewLine}]}
 		return l, rr
 	}
 	rowThreads := func(cells ...sCell) []*review.Comment {
