@@ -141,11 +141,20 @@
     }
   });
 
-  // Keyboard navigation inside the history panel.
-  document.body.addEventListener("keydown", function (e) {
+  // --- Keyboard: one dispatcher with explicit precedence — overlays
+  // first, then the history panel while it is open, then global diff
+  // navigation. Guarded so shortcuts never fire while typing.
+  var isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform);
+  function modKey(e) { return isMac ? e.metaKey : e.ctrlKey; }
+  function typingTarget() {
+    var el = document.activeElement;
+    return el && (/INPUT|TEXTAREA|SELECT/.test(el.tagName) || el.isContentEditable);
+  }
+  var diffMode = document.body.dataset.mode === "diff";
+
+  function historyPanelKeys(e) {
     var panel = document.getElementById("history-panel");
-    if (!panel || panel.hidden) return;
-    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (!panel || panel.hidden) return false;
     var rows = Array.from(panel.querySelectorAll(".hist-row"));
     var idx = rows.indexOf(panel.querySelector(".hist-row.kb-cursor"));
     if (e.key === "j" || e.key === "k") {
@@ -153,12 +162,398 @@
       rows.forEach(function (r) { r.classList.remove("kb-cursor"); });
       rows[idx].classList.add("kb-cursor");
       rows[idx].scrollIntoView({ block: "nearest" });
-      e.preventDefault();
-    } else if ((e.key === " " || e.key === "b") && idx >= 0) {
+      return true;
+    }
+    if ((e.key === " " || e.key === "b") && idx >= 0) {
       var row = rows[idx];
       if (e.key === "b" && !row.dataset.pseudo) setEndpoint({ base: row.dataset.ref });
       if (e.key === " ") setEndpoint({ head: row.dataset.ref });
+      return true;
+    }
+    return false;
+  }
+
+  // --- Hunk navigation: j/k walk the hunk headers of expanded files;
+  // Enter opens a comment on the current hunk's last changed line.
+  function hunkRows() {
+    return Array.from(
+      document.querySelectorAll("#content section.file:not(.collapsed) tr.hunk-row")
+    );
+  }
+  function setKbTarget(row) {
+    document.querySelectorAll("tr.kb-target").forEach(function (r) {
+      r.classList.remove("kb-target");
+    });
+    if (row) {
+      row.classList.add("kb-target");
+      row.scrollIntoView({ block: "center" });
+    }
+  }
+  function hunkNav(delta) {
+    var rows = hunkRows();
+    if (!rows.length) return;
+    var idx = rows.indexOf(document.querySelector("tr.hunk-row.kb-target"));
+    idx = idx < 0 ? (delta > 0 ? 0 : rows.length - 1)
+                  : Math.max(0, Math.min(rows.length - 1, idx + delta));
+    setKbTarget(rows[idx]);
+  }
+  // The rows of the hunk under the cursor, up to the next hunk header.
+  function currentHunkLines() {
+    var cur = document.querySelector("tr.hunk-row.kb-target");
+    if (!cur) return [];
+    var lines = [];
+    for (var row = cur.nextElementSibling; row; row = row.nextElementSibling) {
+      if (row.classList.contains("hunk-row")) break;
+      if (row.classList.contains("line")) lines.push(row);
+    }
+    return lines;
+  }
+  function commentOnCurrentHunk() {
+    var lines = currentHunkLines();
+    // Prefer the last added line, then the last deleted one.
+    var target = null;
+    for (var i = lines.length - 1; i >= 0 && !target; i--) {
+      if (lines[i].querySelector(".add-comment-btn") &&
+          (lines[i].classList.contains("add") || lines[i].querySelector("td.code.add"))) {
+        target = lines[i].querySelector("td.code.add .add-comment-btn") ||
+                 lines[i].querySelector(".add-comment-btn");
+      }
+    }
+    for (i = lines.length - 1; i >= 0 && !target; i--) {
+      if (lines[i].classList.contains("del") || lines[i].querySelector("td.code.del")) {
+        target = lines[i].querySelector("td.code.del .add-comment-btn") ||
+                 lines[i].querySelector(".add-comment-btn");
+      }
+    }
+    if (!target && lines.length) target = lines[lines.length - 1].querySelector(".add-comment-btn");
+    if (target) target.click();
+  }
+  function fileNav(delta) {
+    var files = Array.from(document.querySelectorAll("#content section.file"));
+    if (!files.length) return;
+    var top = window.scrollY + 80;
+    var idx = -1;
+    for (var i = 0; i < files.length; i++) {
+      if (files[i].offsetTop <= top) idx = i;
+    }
+    idx = Math.max(0, Math.min(files.length - 1, idx + delta));
+    files[idx].scrollIntoView({ block: "start" });
+  }
+  function currentFile() {
+    var target = document.querySelector("tr.kb-target");
+    if (target) return target.closest("section.file");
+    var files = Array.from(document.querySelectorAll("#content section.file"));
+    var top = window.scrollY + 80;
+    var best = files[0];
+    for (var i = 0; i < files.length; i++) {
+      if (files[i].offsetTop <= top) best = files[i];
+    }
+    return best;
+  }
+
+  // --- Command palette + fuzzy file filter (one overlay, two modes).
+  var backdrop = document.getElementById("palette-backdrop");
+  var paletteInput = document.getElementById("palette-input");
+  var paletteList = document.getElementById("palette-list");
+  var paletteMode = "commands";
+
+  function fuzzyMatches(query, text) {
+    // Subsequence match, case-insensitive (codiff's file-filter rule).
+    query = query.toLowerCase();
+    text = text.toLowerCase();
+    var qi = 0;
+    for (var ti = 0; ti < text.length && qi < query.length; ti++) {
+      if (text[ti] === query[qi]) qi++;
+    }
+    return qi === query.length;
+  }
+
+  function commandItems() {
+    function click(sel) {
+      return function () {
+        var el = document.querySelector(sel);
+        if (el) el.click();
+      };
+    }
+    return [
+      { label: "Go to file…", hint: "Ctrl/⌘ P", run: function () { openPalette("files"); return true; } },
+      { label: "Find in diffs…", hint: "Ctrl/⌘ F", run: function () { openSearch(); } },
+      { label: "Preset: working tree", run: function () { setEndpoint({ preset: "working" }); } },
+      { label: "Preset: staged", run: function () { setEndpoint({ preset: "staged" }); } },
+      { label: "Preset: branch", run: function () { setEndpoint({ preset: "branch" }); } },
+      { label: "Preset: all since merge-base", run: function () { setEndpoint({ preset: "all" }); } },
+      { label: "View: unified", run: function () { setEndpoint({ view: "unified" }); } },
+      { label: "View: split", run: function () { setEndpoint({ view: "split" }); } },
+      { label: "Toggle merge-base (three-dot)", run: click("#mb-toggle") },
+      { label: "Toggle all files in sidebar", run: click("#allfiles-toggle") },
+      { label: "Toggle hide whitespace", run: click("#ws-toggle") },
+      { label: "Toggle history panel", run: click("#history-toggle") },
+      { label: "Toggle sidebar", hint: "Ctrl/⌘ B", run: toggleSidebar },
+      { label: "Collapse all files", run: function () { setAllCollapsed(true); } },
+      { label: "Expand all files", run: function () { setAllCollapsed(false); } },
+      { label: "Mark all files viewed", run: function () { setAllViewed(true); } },
+      { label: "Clear all viewed marks", run: function () { setAllViewed(false); } },
+      { label: "Copy review as markdown", run: click("#copy-review-btn") },
+      { label: "Comment on review", run: click("#page-comment-btn") },
+      { label: "Toggle live reload on repo changes", run: function () {
+          var on = localStorage.getItem("planman-live-reload") === "1";
+          if (on) localStorage.removeItem("planman-live-reload");
+          else localStorage.setItem("planman-live-reload", "1");
+        } },
+      { label: "Toggle color theme", run: click("#theme-toggle") },
+    ];
+  }
+  function setAllCollapsed(want) {
+    document.querySelectorAll("#content section.file").forEach(function (f) {
+      collapsed[f.dataset.path] = want;
+    });
+    applyFileState();
+  }
+  function setAllViewed(want) {
+    var state = viewedState();
+    document.querySelectorAll("#content section.file:not([data-full-file])").forEach(function (f) {
+      if (want) {
+        state[f.dataset.path] = f.dataset.fp;
+        collapsed[f.dataset.path] = true;
+      } else {
+        delete state[f.dataset.path];
+        delete collapsed[f.dataset.path];
+      }
+    });
+    saveViewed(state);
+    applyFileState();
+  }
+  function fileItems() {
+    return Array.from(document.querySelectorAll(".tree-file[data-path]")).map(function (el) {
+      var path = el.dataset.path;
+      return {
+        label: path,
+        hint: el.classList.contains("unchanged") ? "unchanged" : "",
+        run: function () { el.click(); },
+      };
+    });
+  }
+
+  function renderPalette() {
+    var q = paletteInput.value.trim();
+    var items = paletteMode === "files" ? fileItems() : commandItems();
+    var shown = q ? items.filter(function (i) { return fuzzyMatches(q, i.label); }) : items;
+    shown = shown.slice(0, 50);
+    paletteList.innerHTML = "";
+    shown.forEach(function (item, i) {
+      var div = document.createElement("div");
+      div.className = "palette-item" + (i === 0 ? " sel" : "");
+      var label = document.createElement("span");
+      label.textContent = item.label;
+      div.appendChild(label);
+      if (item.hint) {
+        var hint = document.createElement("span");
+        hint.className = "palette-hint";
+        hint.textContent = item.hint;
+        div.appendChild(hint);
+      }
+      div.addEventListener("click", function () { runPaletteItem(item); });
+      paletteList.appendChild(div);
+    });
+    paletteItemsShown = shown;
+  }
+  var paletteItemsShown = [];
+  function runPaletteItem(item) {
+    var keepOpen = item.run();
+    if (!keepOpen) closePalette();
+  }
+  function openPalette(mode) {
+    paletteMode = mode;
+    backdrop.hidden = false;
+    paletteInput.value = "";
+    paletteInput.placeholder = mode === "files" ? "Go to file…" : "Run a command…";
+    renderPalette();
+    paletteInput.focus();
+  }
+  function closePalette() {
+    backdrop.hidden = true;
+    paletteInput.blur();
+  }
+  if (backdrop) {
+    backdrop.addEventListener("mousedown", function (e) {
+      if (e.target === backdrop) closePalette();
+    });
+    paletteInput.addEventListener("input", renderPalette);
+    paletteInput.addEventListener("keydown", function (e) {
+      var sel = paletteList.querySelector(".palette-item.sel");
+      var all = Array.from(paletteList.querySelectorAll(".palette-item"));
+      var idx = all.indexOf(sel);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        idx = e.key === "ArrowDown" ? Math.min(all.length - 1, idx + 1) : Math.max(0, idx - 1);
+        all.forEach(function (el) { el.classList.remove("sel"); });
+        if (all[idx]) {
+          all[idx].classList.add("sel");
+          all[idx].scrollIntoView({ block: "nearest" });
+        }
+        e.preventDefault();
+      } else if (e.key === "Enter") {
+        if (idx >= 0 && paletteItemsShown[idx]) runPaletteItem(paletteItemsShown[idx]);
+        e.preventDefault();
+      }
+    });
+  }
+
+  // --- Find in diffs: server-side match list, client-side dim + cycle.
+  var searchBar = document.getElementById("search-bar");
+  var searchInput = document.getElementById("search-input");
+  var searchCount = document.getElementById("search-count");
+  var searchMatches = [];
+  var searchIdx = -1;
+  var searchTimer = null;
+
+  function openSearch() {
+    if (!searchBar) return;
+    searchBar.hidden = false;
+    searchInput.focus();
+    searchInput.select();
+  }
+  function clearSearchClasses() {
+    document.querySelectorAll(".search-dimmed").forEach(function (el) {
+      el.classList.remove("search-dimmed");
+    });
+    document.querySelectorAll(".search-hit").forEach(function (el) {
+      el.classList.remove("search-hit");
+    });
+  }
+  function closeSearch() {
+    if (!searchBar) return;
+    searchBar.hidden = true;
+    searchInput.blur();
+    clearSearchClasses();
+    searchMatches = [];
+    searchIdx = -1;
+    searchCount.textContent = "";
+  }
+  function applySearch(res) {
+    clearSearchClasses();
+    searchMatches = [];
+    searchIdx = -1;
+    var matched = {};
+    res.files.forEach(function (f) {
+      matched[f.path] = true;
+      (f.matches || []).forEach(function (mt) {
+        searchMatches.push({ path: f.path, side: mt.side, line: mt.line });
+      });
+    });
+    if (res.query) {
+      document.querySelectorAll("#content section.file:not([data-full-file])").forEach(function (el) {
+        if (!matched[el.dataset.path]) el.classList.add("search-dimmed");
+      });
+      document.querySelectorAll(".tree-file:not(.unchanged)").forEach(function (el) {
+        if (!matched[el.dataset.path]) el.classList.add("search-dimmed");
+      });
+    }
+    searchCount.textContent = res.query
+      ? res.total + " match" + (res.total === 1 ? "" : "es")
+      : "";
+  }
+  function runSearch() {
+    var q = searchInput.value.trim();
+    fetch("/search?q=" + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(applySearch);
+  }
+  function matchRow(m) {
+    var file = document.querySelector(
+      '#content section.file[data-path="' + CSS.escape(m.path) + '"]'
+    );
+    if (!file) return null;
+    var el = file.querySelector('[data-side="' + m.side + '"][data-line="' + m.line + '"]');
+    return el && (el.closest("tr") || el);
+  }
+  function searchNav(delta) {
+    if (!searchMatches.length) return;
+    document.querySelectorAll(".search-hit").forEach(function (el) {
+      el.classList.remove("search-hit");
+    });
+    searchIdx = (searchIdx + delta + searchMatches.length) % searchMatches.length;
+    var m = searchMatches[searchIdx];
+    var row = matchRow(m);
+    if (row) {
+      var file = row.closest("section.file");
+      if (file && file.classList.contains("collapsed")) {
+        delete collapsed[file.dataset.path];
+        file.classList.remove("collapsed");
+      }
+      row.classList.add("search-hit");
+      row.scrollIntoView({ block: "center" });
+    }
+    searchCount.textContent = (searchIdx + 1) + " of " + searchMatches.length;
+  }
+  if (searchBar) {
+    searchInput.addEventListener("input", function () {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(runSearch, 150);
+    });
+    searchInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        searchNav(e.shiftKey ? -1 : 1);
+        e.preventDefault();
+      }
+    });
+    document.getElementById("search-next").addEventListener("click", function () { searchNav(1); });
+    document.getElementById("search-prev").addEventListener("click", function () { searchNav(-1); });
+    document.getElementById("search-close").addEventListener("click", closeSearch);
+  }
+
+  // --- Hold-? shortcut overlay.
+  var kbdHelp = document.getElementById("kbd-help");
+
+  document.body.addEventListener("keydown", function (e) {
+    if (!diffMode) return;
+    // Escape closes overlays even while their inputs are focused.
+    if (e.key === "Escape") {
+      if (backdrop && !backdrop.hidden) { closePalette(); e.preventDefault(); return; }
+      if (searchBar && !searchBar.hidden) { closeSearch(); e.preventDefault(); return; }
+      return;
+    }
+    // Chorded shortcuts work anywhere except while typing a comment.
+    if (modKey(e) && !e.altKey) {
+      var inComment = document.activeElement && document.activeElement.tagName === "TEXTAREA";
+      if (!inComment) {
+        var key = e.key.toLowerCase();
+        if (key === "p" && e.shiftKey) { openPalette("commands"); e.preventDefault(); return; }
+        if (key === "p") { openPalette("files"); e.preventDefault(); return; }
+        if (key === "f") { openSearch(); e.preventDefault(); return; }
+        if (key === "b") { toggleSidebar(); e.preventDefault(); return; }
+      }
+    }
+    if (typingTarget()) return;
+    if (e.key === "?" && kbdHelp) {
+      kbdHelp.hidden = false;
       e.preventDefault();
+      return;
+    }
+    if (modKey(e) || e.altKey) return;
+    if (historyPanelKeys(e)) {
+      e.preventDefault();
+      return;
+    }
+    var panel = document.getElementById("history-panel");
+    if (panel && !panel.hidden) return; // panel owns j/k/space/b while open
+    switch (e.key) {
+      case "j": hunkNav(1); e.preventDefault(); break;
+      case "k": hunkNav(-1); e.preventDefault(); break;
+      case "n": fileNav(1); e.preventDefault(); break;
+      case "p": fileNav(-1); e.preventDefault(); break;
+      case "Enter": commentOnCurrentHunk(); e.preventDefault(); break;
+      case "v": {
+        var file = currentFile();
+        var box = file && file.querySelector(".viewed-box");
+        if (box) box.click();
+        e.preventDefault();
+        break;
+      }
+    }
+  });
+  document.body.addEventListener("keyup", function (e) {
+    if (kbdHelp && !kbdHelp.hidden && (e.key === "?" || e.key === "/" || e.key === "Shift")) {
+      kbdHelp.hidden = true;
     }
   });
 
