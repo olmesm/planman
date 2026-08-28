@@ -984,23 +984,25 @@
   var contentURL = "/content";
 
   // --- After swaps: reapply client state; keep only the newest inline
-  // comment form when one is opened next to a diff row.
-  document.body.addEventListener("htmx:afterSwap", function (e) {
+  // comment form when one is opened next to a diff row. htmx 4 fires
+  // htmx:after:swap with a request context: the resolved target element
+  // and the final request URL live on detail.ctx.
+  document.body.addEventListener("htmx:after:swap", function (e) {
     renderMermaid();
     applyFileState();
     scrollPending();
-    if (e.detail && e.detail.target && e.detail.target.id === "content" && e.detail.pathInfo) {
-      var rp = e.detail.pathInfo.finalRequestPath || e.detail.pathInfo.requestPath || "";
+    var ctx = e.detail && e.detail.ctx;
+    var target = ctx && ctx.target;
+    if (target && target.id === "content" && ctx.request) {
+      var rp = ctx.request.action || "";
       if (rp.indexOf("/walkthrough") === 0 || rp.indexOf("/content") === 0) {
         contentURL = rp;
       } else if (contentURL.indexOf("/walkthrough") === 0) {
         htmx.ajax("GET", contentURL, { target: "#content", swap: "innerHTML" });
       }
     }
-    if (e.detail && e.detail.target && e.detail.target.closest) {
-      var swapped = document.querySelectorAll("tr.form-row");
-      for (var i = 0; i < swapped.length - 1; i++) swapped[i].remove();
-    }
+    var swapped = document.querySelectorAll("tr.form-row");
+    for (var i = 0; i < swapped.length - 1; i++) swapped[i].remove();
     var ta = document.querySelector("tr.form-row textarea, .form-slot textarea, #page-form-slot textarea");
     if (ta) ta.focus();
   });
@@ -1050,6 +1052,18 @@
     document.getElementById("refresh-banner-go").addEventListener("click", refresh);
     document.getElementById("refresh-banner-dismiss").addEventListener("click", hideBanner);
   }
+
+  // A live refresh can race a walkthrough deletion: the stored tour is
+  // gone, /walkthrough answers 404 (left unswapped), and the page would
+  // sit on a dead view. Fall back to the files view.
+  document.body.addEventListener("htmx:response:error", function (e) {
+    var ctx = e.detail && e.detail.ctx;
+    if (!ctx || !ctx.request || ctx.request.action.indexOf("/walkthrough") !== 0) return;
+    if (contentURL.indexOf("/walkthrough") === 0) {
+      contentURL = "/content";
+      htmx.ajax("GET", contentURL, { target: "#content", swap: "innerHTML" });
+    }
+  });
 
   var es = new EventSource("/events");
   es.addEventListener("source-change", onSourceChange);

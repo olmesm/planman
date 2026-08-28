@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- planman's handlers answer errors as plain text, not fragments;
+       keep htmx 2's behavior of never swapping error responses in. -->
+  <meta name="htmx-config" content='{"noSwap": [204, 304, "4xx", "5xx"]}'>
   <title>{{.Title}} — planman</title>
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/highlight.css">

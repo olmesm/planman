@@ -125,9 +125,10 @@ test.describe("walkthrough", () => {
     // Stops still render their prose against the live diff.
     await expect(page.locator(".walk-stop-head h2")).toHaveText("The new greeting");
 
-    // Delete clears the tour and the chip disappears on refresh.
+    // Deleting the tour drops the viewer back to the files view; the
+    // chip is gone.
     await request.delete(`${app.url}/api/walkthrough`);
-    await page.click(".walk-exit");
+    await expect(page.locator(".diff-toolbar")).toBeVisible({ timeout: 10_000 });
     await expect(page.locator("#walkthrough-btn")).toHaveCount(0);
   });
 });
