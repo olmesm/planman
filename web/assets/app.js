@@ -793,17 +793,18 @@
     }
     var panel = document.getElementById("history-panel");
     if (panel && !panel.hidden) return; // panel owns j/k/space/b while open
-    // Walkthrough view: arrows step through the tour.
+    // Walkthrough view: arrows step through the tour. Issue the request
+    // directly from the button's URL rather than clicking it — a click
+    // can land while htmx is still settling freshly swapped content.
     if (document.querySelector(".walkthrough")) {
-      if (e.key === "ArrowRight") {
-        var next = document.getElementById("walk-next");
-        if (next) next.click();
-        e.preventDefault();
-        return;
-      }
-      if (e.key === "ArrowLeft") {
-        var prev = document.getElementById("walk-prev");
-        if (prev) prev.click();
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        var stepBtn = document.getElementById(e.key === "ArrowRight" ? "walk-next" : "walk-prev");
+        if (stepBtn) {
+          htmx.ajax("GET", stepBtn.getAttribute("hx-get"), {
+            target: "#content",
+            swap: "innerHTML",
+          });
+        }
         e.preventDefault();
         return;
       }
