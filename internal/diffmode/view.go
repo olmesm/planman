@@ -344,6 +344,8 @@ type fileVM struct {
 	DisplayPath string // "old → new" for renames
 	Status      string
 	Binary      bool
+	Markdown    bool     // offer a rendered preview toggle
+	Image       *imageVM // binary image: before/after preview
 	Additions   int
 	Deletions   int
 	Fingerprint string
@@ -535,7 +537,9 @@ func buildFileVM(f *gitdiff.File, view string, threads *fileThreads) *fileVM {
 	if threads != nil {
 		vm.Orphans = threads.orphans
 	}
+	vm.Markdown = f.Status != gitdiff.Deleted && isMarkdownPath(f.Path())
 	if f.Binary {
+		vm.Image = imageURLs(f)
 		return vm
 	}
 	lexer := highlight.LexerForFile(f.Path())

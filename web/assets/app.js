@@ -719,6 +719,32 @@
       });
       return;
     }
+    var mdBtn = e.target.closest(".md-preview-btn");
+    if (mdBtn) {
+      var body = mdBtn.closest(".file").querySelector(".file-body");
+      var table = body.querySelector(".diff-table");
+      var preview = body.querySelector(".md-preview");
+      if (preview) {
+        // The table never leaves the DOM: toggling back is instant.
+        var showDiff = preview.style.display !== "none";
+        preview.style.display = showDiff ? "none" : "";
+        if (table) table.style.display = showDiff ? "" : "none";
+        mdBtn.classList.toggle("active", !showDiff);
+      } else {
+        fetch("/mdpreview?path=" + encodeURIComponent(mdBtn.dataset.path))
+          .then(function (r) {
+            if (!r.ok) throw new Error("preview failed");
+            return r.text();
+          })
+          .then(function (html) {
+            if (table) table.style.display = "none";
+            body.insertAdjacentHTML("afterbegin", html);
+            mdBtn.classList.add("active");
+          })
+          .catch(function () {});
+      }
+      return;
+    }
     var copyReview = e.target.closest("#copy-review-btn");
     if (copyReview) {
       fetch("/export.md").then(function (r) { return r.text(); }).then(function (text) {

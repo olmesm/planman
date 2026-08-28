@@ -129,6 +129,10 @@
     <span class="file-status st-{{.Status}}">{{.Status}}</span>
     <span class="file-path">{{.DisplayPath}}</span>
     <button class="icon-btn copy-path" title="Copy file path" data-path="{{.Path}}">⧉</button>
+    {{if .Markdown}}
+    <button class="btn btn-small md-preview-btn" data-path="{{.Path}}"
+            title="Toggle between the diff and the rendered document">Preview</button>
+    {{end}}
     <span class="file-stats">
       {{if .Binary}}BIN{{else}}<span class="stat-add">+{{.Additions}}</span> <span class="stat-del">−{{.Deletions}}</span>{{end}}
     </span>
@@ -137,7 +141,16 @@
     </label>
   </header>
   <div class="file-body">
-    {{if .Binary}}
+    {{if .Image}}
+    <div class="image-diff">
+      {{if .Image.OldURL}}
+      <figure><figcaption>Before</figcaption><img src="{{.Image.OldURL}}" alt="{{.Path}} (base)"></figure>
+      {{end}}
+      {{if .Image.NewURL}}
+      <figure><figcaption>After</figcaption><img src="{{.Image.NewURL}}" alt="{{.Path}} (head)"></figure>
+      {{end}}
+    </div>
+    {{else if .Binary}}
     <div class="binary-note">Binary file not shown</div>
     {{else if and (eq (len .SRows) 0) (eq (len .URows) 0)}}
     <div class="binary-note">No content changes</div>

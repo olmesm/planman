@@ -823,3 +823,32 @@ td.num.in-range { box-shadow: inset 3px 0 0 #d4a72c; }
   border-radius: 999px;
   padding: 0 0.5em;
 }
+
+/* Markdown preview inside a diff card */
+.md-preview { padding: 0.75rem 1.25rem; }
+
+/* Image before/after diff */
+.image-diff {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 1rem;
+}
+.image-diff figure { margin: 0; text-align: center; }
+.image-diff figcaption {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+.image-diff img {
+  max-width: min(100%, 30rem);
+  max-height: 24rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  /* checkerboard so transparency reads */
+  background: conic-gradient(var(--surface) 90deg, transparent 90deg 180deg,
+    var(--surface) 180deg 270deg, transparent 270deg) 0 0 / 16px 16px;
+}

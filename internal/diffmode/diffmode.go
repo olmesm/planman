@@ -468,6 +468,8 @@ func (m *Mode) RegisterRoutes(mux *http.ServeMux, s *server.Server) {
 		m.handleFullFile(w, r, s)
 	})
 	mux.HandleFunc("GET /search", m.handleSearch)
+	mux.HandleFunc("GET /mdpreview", m.handleMarkdownPreview)
+	mux.HandleFunc("GET /blob", m.handleBlob)
 	mux.HandleFunc("GET /export.md", func(w http.ResponseWriter, r *http.Request) {
 		md, err := m.ExportMarkdown(time.Now())
 		if err != nil {

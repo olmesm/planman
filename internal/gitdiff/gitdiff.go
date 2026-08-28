@@ -523,6 +523,30 @@ func (r *Repo) FileLines(ref, path string) ([]string, error) {
 	}
 }
 
+// FileBytes returns a file's raw content at the given endpoint, for
+// serving binary blobs (image previews).
+func (r *Repo) FileBytes(ref, path string) ([]byte, error) {
+	if strings.Contains(path, "..") {
+		return nil, fmt.Errorf("invalid path %q", path)
+	}
+	switch ref {
+	case Worktree, "":
+		return os.ReadFile(filepath.Join(r.Root, path))
+	case Index:
+		out, err := r.gitRaw("show", ":"+path)
+		if err != nil {
+			return nil, err
+		}
+		return []byte(out), nil
+	default:
+		out, err := r.gitRaw("show", ref+":"+path)
+		if err != nil {
+			return nil, err
+		}
+		return []byte(out), nil
+	}
+}
+
 // ListFiles enumerates every file present at the given endpoint —
 // tracked (plus untracked, for the worktree) — for browsing beyond the
 // changed set.
